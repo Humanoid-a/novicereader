@@ -1,0 +1,64 @@
+[
+  {
+    "id": "221fe486-bb46-48c7-a776-316ed97241cb",
+    "paperId": "5e38a2d8-7ee9-44a6-a5bf-db71c79f940b",
+    "userId": "test-user-001",
+    "target": {
+      "type": "text",
+      "id": "420bee9c-76e4-42cd-ab10-b928bdef2cda",
+      "text": "erating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require",
+      "createdAt": "2026-05-02T12:10:31.250Z"
+    },
+    "prompt": "Explain this selection",
+    "response": "AI explanation placeholder:\n\nYou selected this text:\nerating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require\n\nLater, this will connect to your AI backend.",
+    "createdAt": "2026-05-02T12:10:34.607Z"
+  },
+  {
+    "id": "e1dea994-1575-4de1-9e62-f345e2e9d727",
+    "paperId": "5e38a2d8-7ee9-44a6-a5bf-db71c79f940b",
+    "userId": "test-user-001",
+    "target": {
+      "type": "text",
+      "id": "420bee9c-76e4-42cd-ab10-b928bdef2cda",
+      "text": "erating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require",
+      "createdAt": "2026-05-02T12:10:31.250Z"
+    },
+    "prompt": "Explain this selection",
+    "response": "AI explanation placeholder:\n\nYou selected this text:\nerating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require\n\nLater, this will connect to your AI backend.",
+    "createdAt": "2026-05-02T12:10:38.691Z"
+  },
+  {
+    "id": "238a7ae5-13b4-4223-b569-e071b2c097c4",
+    "paperId": "5e38a2d8-7ee9-44a6-a5bf-db71c79f940b",
+    "userId": "test-user-001",
+    "target": {
+      "type": "text",
+      "id": "62d9100d-afff-4413-9c80-1f2b7b755a4e",
+      "text": "ning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning th",
+      "createdAt": "2026-05-02T12:41:23.735Z"
+    },
+    "prompt": "Explain this selection for a beginner.",
+    "response": "Placeholder AI explanation:\n\nYou selected a text passage from the paper. Later, this endpoint will send the selected text, user background, paper context, and prompt to an AI model.\n\nUser prompt: Explain this selection for a beginner.\n\nSelected text preview:\nning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning th",
+    "createdAt": "2026-05-02T12:41:27.208Z"
+  },
+  {
+    "id": "f926164c-3126-49ee-83bd-8b7879947f9d",
+    "paperId": "5e38a2d8-7ee9-44a6-a5bf-db71c79f940b",
+    "userId": "test-user-001",
+    "target": {
+      "type": "text",
+      "id": "39a7162f-14eb-4fcb-9d9d-8c0a25895c9e",
+      "text": "study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more t",
+      "createdAt": "2026-05-02T13:32:08.199Z"
+    },
+    "prompt": "Explain this selection for a beginner.",
+    "response": "Placeholder AI explanation:\n\nYou selected a text passage from the paper. Later, this endpoint will send the selected text, user background, paper context, and prompt to an AI model.\n\nUser prompt: Explain this selection for a beginner.\n\nSelected text preview:\nstudy a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more t",
+    "explanation": {
+      "mainExplanation": "Placeholder AI explanation:\n\nYou selected a text passage from the paper. Later, this endpoint will send the selected text, user background, paper context, and prompt to an AI model.\n\nUser prompt: Explain this selection for a beginner.\n\nSelected text preview:\nstudy a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more t",
+      "knowledgePoints": [],
+      "followUpConversation": [],
+      "relatedConcepts": []
+    },
+    "createdAt": "2026-05-02T13:32:10.710Z"
+  }
+]

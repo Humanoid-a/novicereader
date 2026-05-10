@@ -1,0 +1,192 @@
+[
+  {
+    "id": "id_1778328743855_i4hlgsmzv6s",
+    "paperId": "dcfde1e9-43af-4c5a-aa89-4669b27b2c78",
+    "userId": "test-user-001",
+    "target": {
+      "type": "text",
+      "id": "id_1778328738318_b06xewtw1xn",
+      "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+      "chunks": [
+        {
+          "id": "id_1778328738317_it78gz8he9c",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.1751456067453023,
+            "y": 0.3133680555555556,
+            "width": 0.2651925679125817,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "id_1778328738317_p91l2fxql7r",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12249795751633986,
+            "y": 0.33149463383838385,
+            "width": 0.3208743425755719,
+            "height": 0.012578914141414141
+          }
+        },
+        {
+          "id": "id_1778328738317_azat59qg4tl",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12249795751633986,
+            "y": 0.3284643308080808,
+            "width": 0.3208743425755719,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "id_1778328738317_f1cvvp4d6nl",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.3465988005050505,
+            "width": 0.31724885429432187,
+            "height": 0.012578914141414141
+          }
+        },
+        {
+          "id": "id_1778328738317_9cxpj6agu4l",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.3435684974747475,
+            "width": 0.31724885429432187,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "id_1778328738317_98tb7cm596b",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.36169507575757576,
+            "width": 0.31724342894709967,
+            "height": 0.012578914141414141
+          }
+        },
+        {
+          "id": "id_1778328738317_p4a0ywv5jj",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.3586647727272727,
+            "width": 0.31724342894709967,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "id_1778328738317_op4qxv26oe",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.3767992424242424,
+            "width": 0.3202246572457108,
+            "height": 0.012578914141414141
+          }
+        },
+        {
+          "id": "id_1778328738318_78kw5k2wkf7",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.3737689393939394,
+            "width": 0.3202246572457108,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "id_1778328738318_q2i2ailv5wq",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.39189551767676767,
+            "width": 0.31755530662785947,
+            "height": 0.012578914141414141
+          }
+        },
+        {
+          "id": "id_1778328738318_nwmhoejgmhg",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.3888652146464647,
+            "width": 0.31755530662785947,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "id_1778328738318_y945a7balvo",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.40699968434343436,
+            "width": 0.3202224232792075,
+            "height": 0.012578914141414141
+          }
+        },
+        {
+          "id": "id_1778328738318_evbwflpgwuc",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.4039693813131313,
+            "width": 0.3202224232792075,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "id_1778328738318_5bb82404ui",
+          "pageNumber": 1,
+          "text": "ly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309027777777778,
+            "y": 0.4190656565656566,
+            "width": 0.19751423355800654,
+            "height": 0.01818181818181818
+          }
+        }
+      ],
+      "createdAt": "2026-05-09T12:12:18.318Z"
+    },
+    "prompt": "Explain this selection for a beginner.",
+    "response": "The paper is saying their model \u201cthinks\u201d inside hidden internal states, not by writing lots of extra words. It repeats the same recurrent block again and again at test time, which lets it use more computation when needed. This is different from chain-of-thought models that reason by generating many tokens, and it may work even without special training data or very large models.",
+    "explanation": {
+      "mainExplanation": "The paper is saying their model \u201cthinks\u201d inside hidden internal states, not by writing lots of extra words. It repeats the same recurrent block again and again at test time, which lets it use more computation when needed. This is different from chain-of-thought models that reason by generating many tokens, and it may work even without special training data or very large models.",
+      "knowledgePoints": [],
+      "followUpConversation": [],
+      "relatedConcepts": []
+    },
+    "createdAt": "2026-05-09T12:12:23.855Z"
+  }
+]

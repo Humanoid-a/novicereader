@@ -1,0 +1,14 @@
+{
+  "paperId": "9c78261c-205d-4c89-afae-2fff8d26f82a",
+  "userId": "test-user-001",
+  "strategy": "selected_plus_metadata",
+  "tokenBudgetHint": 4000,
+  "blocks": [
+    {
+      "id": "paper_metadata",
+      "type": "paper_metadata",
+      "title": "Paper metadata",
+      "content": "Original filename: 2502.05171v2.pdf"
+    }
+  ]
+}

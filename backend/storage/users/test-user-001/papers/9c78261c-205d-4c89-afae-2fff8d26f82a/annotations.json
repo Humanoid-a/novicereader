@@ -1,0 +1,312 @@
+[
+  {
+    "id": "d7415ce0-afce-4af6-9f76-02a4f24ce891",
+    "paperId": "9c78261c-205d-4c89-afae-2fff8d26f82a",
+    "userId": "test-user-001",
+    "target": {
+      "type": "text",
+      "id": "1d0bf443-474b-43bf-9ed2-3be803750d34",
+      "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+      "chunks": [
+        {
+          "id": "00cc9f37-9632-4056-aa61-fbcdbf9abec7",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.1363180920968648,
+            "y": 0.2835016886393229,
+            "width": 0.302745086071538,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "b95fdc88-5d79-4d10-ab8b-6f3fe344a0ff",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.30139730434225065,
+            "width": 0.3166448655471303,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "3e366140-4cf5-4013-a965-ef905a8fccb7",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.2986026956577494,
+            "width": 0.3166448655471303,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "becea75d-ec0e-4c68-996f-818e59dfc3ad",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.31649829594775886,
+            "width": 0.3159694896024816,
+            "height": 0.012575769906092172
+          }
+        },
+        {
+          "id": "870d6872-0056-41ac-a337-c21e08f27f70",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.3137037026761758,
+            "width": 0.3159694896024816,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "0f60eaf2-6593-4a90-be69-6ef4e1fc613c",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12248365614149305,
+            "y": 0.33159931837910356,
+            "width": 0.3195424796709048,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "5260e31d-909d-4443-8685-3437cb122a1e",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12248365614149305,
+            "y": 0.3288047096946023,
+            "width": 0.3195424796709048,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "9fef65e5-eb7a-409f-8f17-e814aa3f8417",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.34668350990372476,
+            "width": 0.31599127077588846,
+            "height": 0.012575769906092172
+          }
+        },
+        {
+          "id": "46749fd6-032a-47ad-bba6-01c304a0cf44",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.3438889012192235,
+            "width": 0.31599127077588846,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "5d8b5e4f-88d6-42ac-a7db-79239ef6ea9c",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.36178453233506946,
+            "width": 0.31599127077588846,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "8fb2416c-cb7e-4c46-b64e-2c4c944aa4e0",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.3589898928247317,
+            "width": 0.31599127077588846,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "15349b41-3b5c-40e1-a834-d91422462bed",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.37688552394057767,
+            "width": 0.3189978107128268,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "e37a4d3d-1b45-4120-aa35-e5a98c245825",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.3740909152560764,
+            "width": 0.3189978107128268,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "b257f5b5-e967-408b-a51d-13bccbccd9e6",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.3919865155460859,
+            "width": 0.3162745058146957,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "d9f4f52e-4b80-4f53-b627-efb70762b09d",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.3891919068615846,
+            "width": 0.3162745058146957,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "cdcaf9b9-6ded-468f-b701-279153a4ca62",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.4070875379774306,
+            "width": 0.31893244724647674,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "6c9cc039-d2ed-4412-aa49-50689a9aad69",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.4042929292929293,
+            "width": 0.31893244724647674,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "af879868-c6da-479d-a220-55077448a671",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.4221885604087752,
+            "width": 0.31812636431525737,
+            "height": 0.012575769906092172
+          }
+        },
+        {
+          "id": "ba7e91b6-311f-4dc9-84a6-a05246bfb9a5",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.419393951724274,
+            "width": 0.31812636431525737,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "3904d67a-41db-4407-9de2-90cb65843fb0",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.43728958284011993,
+            "width": 0.31594770842907477,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "ad80f54a-255f-4775-9b09-79de89f2620c",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.4344949433297822,
+            "width": 0.31594770842907477,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "2712df83-5c15-4fae-829b-42347938da0c",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.45239057444562814,
+            "width": 0.31891066607306984,
+            "height": 0.012575754493173927
+          }
+        },
+        {
+          "id": "f00e0c1c-7875-4ec0-a129-a760cc5c19a6",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.44959596576112687,
+            "width": 0.31891066607306984,
+            "height": 0.01818181818181818
+          }
+        },
+        {
+          "id": "6ffe06af-716f-4c4d-9bc3-0c01e80d3b03",
+          "pageNumber": 1,
+          "text": "e study a novel language model architecture\nthat is capable of scaling test-time computation by\nimplicitly reasoning in latent space. Our model\nworks by iterating a recurrent block, thereby un-\nrolling to arbitrary depth at test-time. This stands\nin contrast to mainstream reasoning models that\nscale up compute by producing more tokens. Un-\nlike approaches based on chain-of-thought, our\napproach does not require any specialized train-\ning data, can work with small context windows,\nand can capture types of reasoning that are not\neasily represented in words. We scale a proof-of-\nconcept model to 3.5 billion parameters and 800",
+          "rect": {
+            "pageNumber": 1,
+            "x": 0.12309368856592116,
+            "y": 0.4646969573666351,
+            "width": 0.3159694896024816,
+            "height": 0.01818181818181818
+          }
+        }
+      ],
+      "createdAt": "2026-05-08T12:21:54.404Z"
+    },
+    "prompt": "Explain this selection for a beginner.",
+    "response": "This passage is describing the paper\u2019s main idea in simple terms:\n\n### Big picture\nThe authors are proposing a **new kind of language model architecture**. A language model is a system that predicts and generates text. The unusual part here is that instead of making the model \u201cthink longer\u201d by generating more words, they make it \u201cthink longer\u201d by doing **more internal computation**.\n\n### Key idea: reasoning in latent space\nThe phrase **latent space** means the model\u2019s hidden internal representations \u2014 the vectors inside the network that are not directly visible as text.\n\nSo when they say the model is \u201cimplicitly reasoning in latent space,\u201d they mean:\n\n- the model performs reasoning inside its hidden layers,\n- not by spelling out every step in natural language,\n- so it can do some thinking without producing tokens.\n\n### How it works: iterating a recurrent block\nA **recurrent block** is a neural network component that can be applied repeatedly.  \n\u201cIterating\u201d it means running the same block over and over.\n\nThis lets the model **unroll to arbitrary depth at test time**:\n- **test time** = when the model is being used after training\n- **arbitrary depth** = as many repeated steps as needed\n\nIn plain language: the model can spend more time thinking at inference time by looping internally.\n\n### How this differs from mainstream reasoning models\nMost current reasoning models scale computation by generating more text, often through **chain-of-thought**.\n\n**Chain-of-thought** means the model writes out intermediate reasoning steps in words, like showing its work on a math problem.\n\nThe authors contrast their method with that:\n\n- **Mainstream approach:** more tokens = more thinking\n- **Their approach:** more internal loops = more thinking\n\n### Why this matters\nThey say their approach has several advantages:\n\n1. **No specialized training data needed**  \n   Some reasoning models need examples of step-by-step explanations during training.  \n   This method supposedly avoids that.\n\n2. **Works with small context windows**  \n   A **context window** is how much text the model can look at at once.  \n   Their model may be useful even when that window is limited.\n\n3. **Can capture reasoning not easily expressed in words**  \n   Some thought processes are hard to write as text, but can still happen inside hidden representations.\n\n### Final sentence\nThey mention they \u201cscale a proof-of-concept model to 3.5 billion parameters and 800 ...\u201d  \nThis means they built an early version of the idea at a fairly large size.\n\n- **Parameters** are the learned numbers inside the model that store its knowledge.\n- A **proof-of-concept model** is a first demonstration that the idea can work, not yet the final best version.\n\nThe text is cut off after \u201c800,\u201d so we can\u2019t see the rest of that measurement, but it likely refers to some training or computation amount.\n\n### Why this selected part is important\nThis is basically the paper\u2019s **core claim**:\nthey want to make language models reason better by increasing **internal computation**, not by making them talk more.\n\nIf you want, I can also rewrite this passage in even simpler \u201cplain English\u201d sentence by sentence.",
+    "explanation": {
+      "mainExplanation": "This passage is describing the paper\u2019s main idea in simple terms:\n\n### Big picture\nThe authors are proposing a **new kind of language model architecture**. A language model is a system that predicts and generates text. The unusual part here is that instead of making the model \u201cthink longer\u201d by generating more words, they make it \u201cthink longer\u201d by doing **more internal computation**.\n\n### Key idea: reasoning in latent space\nThe phrase **latent space** means the model\u2019s hidden internal representations \u2014 the vectors inside the network that are not directly visible as text.\n\nSo when they say the model is \u201cimplicitly reasoning in latent space,\u201d they mean:\n\n- the model performs reasoning inside its hidden layers,\n- not by spelling out every step in natural language,\n- so it can do some thinking without producing tokens.\n\n### How it works: iterating a recurrent block\nA **recurrent block** is a neural network component that can be applied repeatedly.  \n\u201cIterating\u201d it means running the same block over and over.\n\nThis lets the model **unroll to arbitrary depth at test time**:\n- **test time** = when the model is being used after training\n- **arbitrary depth** = as many repeated steps as needed\n\nIn plain language: the model can spend more time thinking at inference time by looping internally.\n\n### How this differs from mainstream reasoning models\nMost current reasoning models scale computation by generating more text, often through **chain-of-thought**.\n\n**Chain-of-thought** means the model writes out intermediate reasoning steps in words, like showing its work on a math problem.\n\nThe authors contrast their method with that:\n\n- **Mainstream approach:** more tokens = more thinking\n- **Their approach:** more internal loops = more thinking\n\n### Why this matters\nThey say their approach has several advantages:\n\n1. **No specialized training data needed**  \n   Some reasoning models need examples of step-by-step explanations during training.  \n   This method supposedly avoids that.\n\n2. **Works with small context windows**  \n   A **context window** is how much text the model can look at at once.  \n   Their model may be useful even when that window is limited.\n\n3. **Can capture reasoning not easily expressed in words**  \n   Some thought processes are hard to write as text, but can still happen inside hidden representations.\n\n### Final sentence\nThey mention they \u201cscale a proof-of-concept model to 3.5 billion parameters and 800 ...\u201d  \nThis means they built an early version of the idea at a fairly large size.\n\n- **Parameters** are the learned numbers inside the model that store its knowledge.\n- A **proof-of-concept model** is a first demonstration that the idea can work, not yet the final best version.\n\nThe text is cut off after \u201c800,\u201d so we can\u2019t see the rest of that measurement, but it likely refers to some training or computation amount.\n\n### Why this selected part is important\nThis is basically the paper\u2019s **core claim**:\nthey want to make language models reason better by increasing **internal computation**, not by making them talk more.\n\nIf you want, I can also rewrite this passage in even simpler \u201cplain English\u201d sentence by sentence.",
+      "knowledgePoints": [],
+      "followUpConversation": [],
+      "relatedConcepts": []
+    },
+    "createdAt": "2026-05-08T12:22:04.406Z"
+  }
+]

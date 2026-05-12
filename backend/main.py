@@ -19,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(users.router)
+app.include_router(users.auth_router)
 app.include_router(papers.router)
 app.include_router(annotations.router)
 app.include_router(ai.router)

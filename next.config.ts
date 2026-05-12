@@ -1,16 +1,24 @@
 import type { NextConfig } from "next";
 import os from "node:os";
 
+type NetworkInterfaceInfo = NonNullable<
+  ReturnType<typeof os.networkInterfaces>[string]
+>[number];
+
+function isLocalIpv4Interface(
+  networkInterface: NetworkInterfaceInfo | undefined
+): networkInterface is NetworkInterfaceInfo {
+  return Boolean(
+    networkInterface &&
+      networkInterface.family === "IPv4" &&
+      !networkInterface.internal
+  );
+}
+
 function getLocalIpv4Hosts() {
   return Object.values(os.networkInterfaces())
     .flat()
-    .filter((networkInterface) => {
-      return (
-        networkInterface &&
-        networkInterface.family === "IPv4" &&
-        !networkInterface.internal
-      );
-    })
+    .filter(isLocalIpv4Interface)
     .map((networkInterface) => networkInterface.address);
 }
 

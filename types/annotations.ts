@@ -78,6 +78,15 @@ export type AiExplanationContent = {
   knowledgePoints: KnowledgePoint[];
   followUpConversation: ConversationMessage[];
   relatedConcepts: string[];
+  followUpExplanations?: FollowUpExplanationItem[];
+};
+
+export type FollowUpExplanationItem = {
+  id: string;
+  prompt: string;
+  response?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AiAnnotation = {
@@ -89,4 +98,6 @@ export type AiAnnotation = {
   response: string;
   explanation: AiExplanationContent;
   createdAt: string;
+  isDeleted?: boolean;
+  deletedAt?: string | null;
 };

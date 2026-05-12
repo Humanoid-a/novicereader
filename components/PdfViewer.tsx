@@ -17,27 +17,42 @@ type PdfViewerProps = {
   fileUrl: string;
   selectionTool: SelectionTool;
   annotations: AiAnnotation[];
+  zoom: number;
+  targetToReveal?: { targetId: string; nonce: number } | null;
+  currentSelection?: TextAnnotationTarget | RegionAnnotationTarget | null;
+  onPageStatusChange: (status: { currentPage: number; numPages: number }) => void;
   onTextSelected: (target: TextAnnotationTarget) => void;
   onRegionSelected: (region: RegionAnnotationTarget) => void;
-  onAnnotationClick: (annotation: AiAnnotation) => void;
+  onAnnotationContextMenu: (annotations: AiAnnotation[]) => void;
+  onAnnotationContextMenuEmpty: () => void;
 };
 
 export default function PdfViewer({
   fileUrl,
   selectionTool,
   annotations,
+  zoom,
+  targetToReveal,
+  currentSelection,
+  onPageStatusChange,
   onTextSelected,
   onRegionSelected,
-  onAnnotationClick,
+  onAnnotationContextMenu,
+  onAnnotationContextMenuEmpty,
 }: PdfViewerProps) {
   return (
     <PdfViewerClient
       fileUrl={fileUrl}
       selectionTool={selectionTool}
       annotations={annotations}
+      zoom={zoom}
+      targetToReveal={targetToReveal}
+      currentSelection={currentSelection}
+      onPageStatusChange={onPageStatusChange}
       onTextSelected={onTextSelected}
       onRegionSelected={onRegionSelected}
-      onAnnotationClick={onAnnotationClick}
+      onAnnotationContextMenu={onAnnotationContextMenu}
+      onAnnotationContextMenuEmpty={onAnnotationContextMenuEmpty}
     />
   );
 }

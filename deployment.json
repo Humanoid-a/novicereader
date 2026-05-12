@@ -1,0 +1,8 @@
+{
+  "isBuiltDeployment": true,
+  "productionDomain": "novicereader.com",
+  "productionOrigin": "https://novicereader.com",
+  "productionWwwOrigin": "https://www.novicereader.com",
+  "localFrontendOrigin": "http://localhost:3000",
+  "localBackendPort": 8000
+}

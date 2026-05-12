@@ -16,5 +16,26 @@
     },
     "createdAt": "2026-05-09T12:12:20.306012+00:00",
     "updatedAt": "2026-05-09T12:12:20.306012+00:00"
+  },
+  {
+    "id": "novicereader",
+    "username": "novicereader",
+    "displayName": "Andy Wang",
+    "knowledgeProfile": {
+      "educationLevel": "high_school",
+      "assumedFromEmptyOnboarding": true,
+      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
+      "knownCourses": [],
+      "knownConcepts": [],
+      "knownDomains": [],
+      "learningGoals": [],
+      "weakAreas": [],
+      "explanationPreference": "beginner-friendly",
+      "explanationDepth": "gentle"
+    },
+    "createdAt": "2026-05-11T09:41:52.783361+00:00",
+    "updatedAt": "2026-05-11T09:41:52.783361+00:00",
+    "passwordHash": "$argon2id$v=19$m=65536,t=3,p=4$f4/emNuB/MS72VPmZERfXw$88ovQmWt8rohe+g73nHmlywaQEXYGdSH+RFqjt5/qNE",
+    "disabled": false
   }
 ]

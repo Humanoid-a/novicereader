@@ -89,6 +89,49 @@ def build_context_for_selection(
     )
 
 
+def build_context_for_question(
+    user_id: str,
+    paper_id: str,
+) -> DocumentContext:
+    paper = find_paper_or_404(user_id, paper_id)
+
+    saved_context = read_json(
+        get_document_context_path(user_id, paper_id),
+        {
+            "paperId": paper_id,
+            "userId": user_id,
+            "strategy": "selected_plus_metadata",
+            "tokenBudgetHint": 4000,
+            "blocks": [],
+        },
+    )
+
+    blocks: list[DocumentContextBlock] = [
+        DocumentContextBlock(
+            id="paper_metadata",
+            type="paper_metadata",
+            title="Paper metadata",
+            content=(
+                f"Original filename: {paper['originalFilename']}\n"
+                f"Content type: {paper['contentType']}\n"
+                f"Size bytes: {paper['sizeBytes']}"
+            ),
+        )
+    ]
+
+    for block in saved_context.get("blocks", []):
+        if block.get("type") in ["abstract", "summary", "nearby_text", "user_profile"]:
+            blocks.append(DocumentContextBlock(**block))
+
+    return DocumentContext(
+        paperId=paper_id,
+        userId=user_id,
+        blocks=blocks,
+        strategy=saved_context.get("strategy", "selected_plus_metadata"),
+        tokenBudgetHint=saved_context.get("tokenBudgetHint", 4000),
+    )
+
+
 def context_to_prompt_text(context: DocumentContext) -> str:
     parts = []
 

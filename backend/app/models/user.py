@@ -51,7 +51,32 @@ class KnowledgeProfileSummary(BaseModel):
 
 class UserProfile(BaseModel):
     id: str
-    displayName: str = "Test User"
+    username: str
+    displayName: str = "NoviceReader User"
     knowledgeProfile: UserKnowledgeProfile = Field(default_factory=UserKnowledgeProfile)
     createdAt: str
     updatedAt: str
+
+
+class StoredUserProfile(UserProfile):
+    passwordHash: str
+    disabled: bool = False
+
+
+class RegisterUserRequest(BaseModel):
+    username: str
+    password: str
+    registrationCode: str
+    displayName: Optional[str] = None
+    knowledgeProfile: Optional[UserKnowledgeProfile] = None
+
+
+class LoginUserRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthToken(BaseModel):
+    accessToken: str
+    tokenType: str = "bearer"
+    user: UserProfile

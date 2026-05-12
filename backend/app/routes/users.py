@@ -1,15 +1,24 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.models.user import KnowledgeProfileSummary, UserKnowledgeProfile, UserProfile
+from app.models.user import (
+    AuthToken,
+    KnowledgeProfileSummary,
+    LoginUserRequest,
+    RegisterUserRequest,
+    UserKnowledgeProfile,
+    UserProfile,
+)
+from app.services.auth_dependency import get_current_user
 from app.services.user_service import (
-    create_user_profile,
     get_knowledge_profile_summary,
-    get_user_profile,
+    login_user,
+    register_user,
     update_user_knowledge_profile,
 )
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class CreateUserRequest(BaseModel):
@@ -19,12 +28,18 @@ class CreateUserRequest(BaseModel):
 
 
 @router.get("/{user_id}", response_model=UserProfile)
-def read_user_profile(user_id: str):
+def read_user_profile(
+    user_id: str,
+    current_user: UserProfile = Depends(get_current_user),
+):
     """
     Read a user profile, creating a default profile when none exists yet.
     """
 
-    return get_user_profile(user_id)
+    if user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot read another user's profile")
+
+    return current_user
 
 
 @router.post("", response_model=UserProfile)
@@ -36,21 +51,35 @@ def create_user(request: CreateUserRequest):
     onboarding form and uses the high-school baseline.
     """
 
-    return create_user_profile(
-        user_id=request.id,
-        display_name=request.displayName,
-        knowledge_profile=request.knowledgeProfile,
+    raise HTTPException(
+        status_code=410,
+        detail="Use /api/auth/register with a registration code and password.",
     )
 
 
-@router.put("/{user_id}/knowledge-profile", response_model=UserProfile)
+@auth_router.post("/register", response_model=AuthToken)
+def register(request: RegisterUserRequest):
+    return register_user(request)
+
+
+@auth_router.post("/login", response_model=AuthToken)
+def login(request: LoginUserRequest):
+    return login_user(request)
+
+
+@auth_router.get("/me", response_model=UserProfile)
+def read_current_user(current_user: UserProfile = Depends(get_current_user)):
+    return current_user
+
+
+@router.put("/me/knowledge-profile", response_model=UserProfile)
 def put_user_knowledge_profile(
-    user_id: str,
     knowledge_profile: UserKnowledgeProfile,
+    current_user: UserProfile = Depends(get_current_user),
 ):
-    return update_user_knowledge_profile(user_id, knowledge_profile)
+    return update_user_knowledge_profile(current_user.id, knowledge_profile)
 
 
-@router.get("/{user_id}/knowledge-summary", response_model=KnowledgeProfileSummary)
-def read_user_knowledge_summary(user_id: str):
-    return get_knowledge_profile_summary(user_id)
+@router.get("/me/knowledge-summary", response_model=KnowledgeProfileSummary)
+def read_user_knowledge_summary(current_user: UserProfile = Depends(get_current_user)):
+    return get_knowledge_profile_summary(current_user.id)

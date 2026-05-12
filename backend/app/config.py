@@ -14,6 +14,10 @@ def parse_csv_env(value: str | None, default: list[str]) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def unique_values(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
 def get_default_frontend_origin() -> str:
     if deployment_config.isBuiltDeployment:
         return deployment_config.productionOrigin
@@ -29,6 +33,15 @@ def get_default_frontend_origins() -> list[str]:
         ]
 
     return [deployment_config.localFrontendOrigin]
+
+
+def get_configured_frontend_origins() -> list[str]:
+    configured_origins = [
+        *parse_csv_env(os.getenv("FRONTEND_ORIGIN"), []),
+        *parse_csv_env(os.getenv("FRONTEND_ORIGINS"), []),
+    ]
+
+    return unique_values([*get_default_frontend_origins(), *configured_origins])
 
 
 def get_default_public_backend_origin() -> str:
@@ -67,13 +80,7 @@ class Settings(BaseModel):
     )
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", get_default_frontend_origin())
     frontend_origins: list[str] = Field(
-        default_factory=lambda: parse_csv_env(
-            os.getenv("FRONTEND_ORIGINS"),
-            parse_csv_env(
-                os.getenv("FRONTEND_ORIGIN"),
-                get_default_frontend_origins(),
-            ),
-        )
+        default_factory=get_configured_frontend_origins
     )
     frontend_origin_regex: str | None = os.getenv(
         "FRONTEND_ORIGIN_REGEX",

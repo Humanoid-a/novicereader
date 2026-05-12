@@ -24,7 +24,13 @@ type PdfViewerClientProps = {
   selectionTool: SelectionTool;
   annotations: AiAnnotation[];
   zoom: number;
-  targetToReveal?: { targetId: string; nonce: number } | null;
+  visualZoom: number;
+  targetToReveal?: {
+    targetId: string;
+    nonce: number;
+    behavior?: ScrollBehavior;
+    trackVisualPosition?: boolean;
+  } | null;
   currentSelection?: TextAnnotationTarget | RegionAnnotationTarget | null;
   onPageStatusChange: (status: { currentPage: number; numPages: number }) => void;
   onTextSelected: (target: TextAnnotationTarget) => void;
@@ -362,6 +368,7 @@ export default function PdfViewerClient({
   selectionTool,
   annotations,
   zoom,
+  visualZoom,
   targetToReveal,
   currentSelection,
   onPageStatusChange,
@@ -378,6 +385,7 @@ export default function PdfViewerClient({
   >([]);
 
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const lastRevealKeyRef = useRef<string | null>(null);
   const visiblePageRatios = useRef<Record<number, number>>({});
 
   useEffect(() => {
@@ -466,7 +474,10 @@ export default function PdfViewerClient({
     const scrollContainer = findScrollableParent(pageElement);
 
     if (!bounds || !scrollContainer) {
-      pageElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      pageElement.scrollIntoView({
+        behavior: targetToReveal.behavior ?? "smooth",
+        block: "center",
+      });
       return;
     }
 
@@ -480,7 +491,7 @@ export default function PdfViewerClient({
 
     scrollContainer.scrollTo({
       top: Math.max(targetTop - scrollContainer.clientHeight * 0.35, 0),
-      behavior: "smooth",
+      behavior: targetToReveal.behavior ?? "smooth",
     });
   }, [annotations, currentSelection, targetToReveal]);
 
@@ -832,6 +843,7 @@ export default function PdfViewerClient({
   }
 
   const pageWidth = Math.round(900 * zoom);
+  const visualScale = zoom > 0 ? visualZoom / zoom : 1;
   const annotationOverlays = getNewestAnnotationsForTargets(annotations);
   const pdfFile = useMemo(
     () => ({ url: fileUrl, httpHeaders: getAuthHeaders() }) as { url: string },
@@ -847,6 +859,12 @@ export default function PdfViewerClient({
       )}
 
       <div className="flex w-full flex-col items-center gap-4 rounded-lg bg-slate-200 p-2">
+      <div
+        className="flex w-full flex-col items-center gap-4"
+        style={{
+          zoom: visualScale,
+        }}
+      >
       <Document
         file={pdfFile}
           onLoadSuccess={({ numPages }) => {
@@ -1043,6 +1061,7 @@ export default function PdfViewerClient({
             );
           })}
         </Document>
+        </div>
       </div>
     </div>
   );

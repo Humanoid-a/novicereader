@@ -18,7 +18,13 @@ type PdfViewerProps = {
   selectionTool: SelectionTool;
   annotations: AiAnnotation[];
   zoom: number;
-  targetToReveal?: { targetId: string; nonce: number } | null;
+  visualZoom: number;
+  targetToReveal?: {
+    targetId: string;
+    nonce: number;
+    behavior?: ScrollBehavior;
+    trackVisualPosition?: boolean;
+  } | null;
   currentSelection?: TextAnnotationTarget | RegionAnnotationTarget | null;
   onPageStatusChange: (status: { currentPage: number; numPages: number }) => void;
   onTextSelected: (target: TextAnnotationTarget) => void;
@@ -32,6 +38,7 @@ export default function PdfViewer({
   selectionTool,
   annotations,
   zoom,
+  visualZoom,
   targetToReveal,
   currentSelection,
   onPageStatusChange,
@@ -46,6 +53,7 @@ export default function PdfViewer({
       selectionTool={selectionTool}
       annotations={annotations}
       zoom={zoom}
+      visualZoom={visualZoom}
       targetToReveal={targetToReveal}
       currentSelection={currentSelection}
       onPageStatusChange={onPageStatusChange}

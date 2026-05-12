@@ -1,7 +1,12 @@
 "use client";
 
 import { AppMenu } from "@/components/AppMenu";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createId } from "@/lib/id";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -124,12 +129,39 @@ function LoadingDots() {
   );
 }
 
+function getAiExplanationEmptyMessage(selection: AnnotationTarget | null) {
+  if (selection?.type === "text") {
+    return "Click Explain selection to explain the highlighted text.";
+  }
+
+  if (selection?.type === "region") {
+    return "Click Explain selection to explain the selected region.";
+  }
+
+  return "Select text or a region, then click Explain selection.";
+}
+
+const PDF_ZOOM_MIN = 0.5;
+const PDF_ZOOM_MAX = 1.6;
+const PDF_ZOOM_STEP = 0.1;
+
+function clampPdfZoom(zoom: number) {
+  return Math.min(Math.max(zoom, PDF_ZOOM_MIN), PDF_ZOOM_MAX);
+}
+
 export default function ReaderPage() {
   const params = useParams<{ paperId: string }>();
   const router = useRouter();
   const paperId = params.paperId;
   const pdfScrollContainerRef = useRef<HTMLElement | null>(null);
-  const historyHoverScrollTopRef = useRef<number | null>(null);
+  const pdfZoomCommitTimeoutRef = useRef<number | null>(null);
+  const pdfGestureStartZoomRef = useRef(1);
+  const pdfVisualZoomRef = useRef(1);
+  const historyHoverScrollPositionRef = useRef<{
+    left: number;
+    top: number;
+    visualZoom: number;
+  } | null>(null);
   const targetRevealNonceRef = useRef(0);
 
   const [paper, setPaper] = useState<PaperWithUrls | null>(null);
@@ -137,9 +169,12 @@ export default function ReaderPage() {
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1);
   const [pdfNumPages, setPdfNumPages] = useState(0);
   const [pdfZoom, setPdfZoom] = useState(1);
+  const [pdfVisualZoom, setPdfVisualZoom] = useState(1);
   const [targetToReveal, setTargetToReveal] = useState<{
     targetId: string;
     nonce: number;
+    behavior?: ScrollBehavior;
+    trackVisualPosition?: boolean;
   } | null>(null);
 
   const [selectionTool, setSelectionTool] = useState<SelectionTool>("highlight");
@@ -203,6 +238,10 @@ useEffect(() => {
 }, [paper]);
 
 useEffect(() => {
+  pdfVisualZoomRef.current = pdfVisualZoom;
+}, [pdfVisualZoom]);
+
+useEffect(() => {
   if (!paperId) {
     return;
   }
@@ -236,6 +275,144 @@ useEffect(() => {
   loadPaperWorkspace();
 }, [paperId, router]);
 
+useEffect(() => {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer) {
+    return;
+  }
+
+  const activeScrollContainer = scrollContainer;
+
+  function schedulePdfZoomCommit(nextZoom: number) {
+    clearPendingPdfZoomCommit();
+
+    pdfZoomCommitTimeoutRef.current = window.setTimeout(() => {
+      setPdfZoom(nextZoom);
+      pdfZoomCommitTimeoutRef.current = null;
+    }, 180);
+  }
+
+  function setFastPdfZoom(nextZoom: number) {
+    setPdfVisualZoom((currentZoom) => {
+      const clampedNextZoom = clampPdfZoom(nextZoom);
+
+      if (Math.abs(clampedNextZoom - currentZoom) < 0.001) {
+        return currentZoom;
+      }
+
+      const zoomRatio = clampedNextZoom / currentZoom;
+      const scrollContainerRect = activeScrollContainer.getBoundingClientRect();
+      const pointerX = scrollContainerRect.width / 2;
+      const pointerY = scrollContainerRect.height / 2;
+      const contentX = activeScrollContainer.scrollLeft + pointerX;
+      const contentY = activeScrollContainer.scrollTop + pointerY;
+
+      window.requestAnimationFrame(() => {
+        activeScrollContainer.scrollLeft = contentX * zoomRatio - pointerX;
+        activeScrollContainer.scrollTop = contentY * zoomRatio - pointerY;
+      });
+
+      schedulePdfZoomCommit(clampedNextZoom);
+
+      return clampedNextZoom;
+    });
+  }
+
+  function handlePdfWheelZoom(event: globalThis.WheelEvent) {
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    const scrollContainerRect = activeScrollContainer.getBoundingClientRect();
+    const pointerX = event.clientX - scrollContainerRect.left;
+    const pointerY = event.clientY - scrollContainerRect.top;
+    const contentX = activeScrollContainer.scrollLeft + pointerX;
+    const contentY = activeScrollContainer.scrollTop + pointerY;
+    const boundedDeltaY = Math.max(Math.min(event.deltaY, 80), -80);
+
+    setPdfVisualZoom((currentZoom) => {
+      const nextZoom = clampPdfZoom(
+        currentZoom * Math.exp(-boundedDeltaY * 0.003)
+      );
+
+      if (Math.abs(nextZoom - currentZoom) < 0.001) {
+        return currentZoom;
+      }
+
+      const zoomRatio = nextZoom / currentZoom;
+
+      window.requestAnimationFrame(() => {
+        activeScrollContainer.scrollLeft = contentX * zoomRatio - pointerX;
+        activeScrollContainer.scrollTop = contentY * zoomRatio - pointerY;
+      });
+
+      schedulePdfZoomCommit(nextZoom);
+
+      return nextZoom;
+    });
+  }
+
+  function handlePdfGestureStart(event: Event) {
+    event.preventDefault();
+    event.stopPropagation();
+    pdfGestureStartZoomRef.current = pdfVisualZoomRef.current;
+  }
+
+  function handlePdfGestureChange(event: Event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const gestureScale = (event as Event & { scale?: number }).scale;
+
+    if (typeof gestureScale !== "number") {
+      return;
+    }
+
+    setFastPdfZoom(pdfGestureStartZoomRef.current * gestureScale);
+  }
+
+  activeScrollContainer.addEventListener("wheel", handlePdfWheelZoom, {
+    capture: true,
+    passive: false,
+  });
+  activeScrollContainer.addEventListener(
+    "gesturestart",
+    handlePdfGestureStart,
+    {
+      capture: true,
+      passive: false,
+    }
+  );
+  activeScrollContainer.addEventListener(
+    "gesturechange",
+    handlePdfGestureChange,
+    {
+      capture: true,
+      passive: false,
+    }
+  );
+
+  return () => {
+    clearPendingPdfZoomCommit();
+    activeScrollContainer.removeEventListener("wheel", handlePdfWheelZoom, true);
+    activeScrollContainer.removeEventListener(
+      "gesturestart",
+      handlePdfGestureStart,
+      true
+    );
+    activeScrollContainer.removeEventListener(
+      "gesturechange",
+      handlePdfGestureChange,
+      true
+    );
+  };
+}, [isLoading, paper?.fileUrl]);
+
 
 function requestDeleteSelectedAnnotation() {
   if (!selectedAnnotation) {
@@ -260,43 +437,75 @@ function clearSelection() {
   setQuestionTurns([]);
 }
 
+function clearPendingPdfZoomCommit() {
+  if (pdfZoomCommitTimeoutRef.current === null) {
+    return;
+  }
+
+  window.clearTimeout(pdfZoomCommitTimeoutRef.current);
+  pdfZoomCommitTimeoutRef.current = null;
+}
+
+function setCommittedPdfZoom(nextZoom: number) {
+  const clampedNextZoom = clampPdfZoom(nextZoom);
+
+  clearPendingPdfZoomCommit();
+  setPdfZoom(clampedNextZoom);
+  setPdfVisualZoom(clampedNextZoom);
+}
+
 function zoomPdfIn() {
-  setPdfZoom((currentZoom) => Math.min(currentZoom + 0.1, 1.6));
+  setCommittedPdfZoom(pdfVisualZoom + PDF_ZOOM_STEP);
 }
 
 function zoomPdfOut() {
-  setPdfZoom((currentZoom) => Math.max(currentZoom - 0.1, 0.5));
+  setCommittedPdfZoom(pdfVisualZoom - PDF_ZOOM_STEP);
 }
 
 function resetPdfZoom() {
-  setPdfZoom(1);
+  setCommittedPdfZoom(1);
 }
 
 function previewHistoryAnnotation(targetId: string) {
   const scrollContainer = pdfScrollContainerRef.current;
 
-  if (scrollContainer && historyHoverScrollTopRef.current === null) {
-    historyHoverScrollTopRef.current = scrollContainer.scrollTop;
+  if (scrollContainer && historyHoverScrollPositionRef.current === null) {
+    historyHoverScrollPositionRef.current = {
+      left: scrollContainer.scrollLeft,
+      top: scrollContainer.scrollTop,
+      visualZoom: pdfVisualZoomRef.current,
+    };
   }
 
   targetRevealNonceRef.current += 1;
-  setTargetToReveal({ targetId, nonce: targetRevealNonceRef.current });
+  setTargetToReveal({
+    targetId,
+    nonce: targetRevealNonceRef.current,
+    behavior: "auto",
+    trackVisualPosition: true,
+  });
 }
 
 function restoreHistoryAnnotationPreview() {
   const scrollContainer = pdfScrollContainerRef.current;
-  const previousScrollTop = historyHoverScrollTopRef.current;
+  const previousScrollPosition = historyHoverScrollPositionRef.current;
 
   setTargetToReveal(null);
 
-  if (scrollContainer && previousScrollTop !== null) {
+  if (scrollContainer && previousScrollPosition !== null) {
+    const zoomRatio =
+      previousScrollPosition.visualZoom > 0
+        ? pdfVisualZoomRef.current / previousScrollPosition.visualZoom
+        : 1;
+
     scrollContainer.scrollTo({
-      top: previousScrollTop,
-      behavior: "smooth",
+      left: previousScrollPosition.left * zoomRatio,
+      top: previousScrollPosition.top * zoomRatio,
+      behavior: "auto",
     });
   }
 
-  historyHoverScrollTopRef.current = null;
+  historyHoverScrollPositionRef.current = null;
 }
 
 function revealCurrentSelection() {
@@ -473,6 +682,7 @@ function handleAnnotationContextMenu(hitAnnotations: AiAnnotation[]) {
 function handleTextSelected(target: TextAnnotationTarget) {
   setCurrentSelection(target);
   setSelectedAnnotation(null);
+  setAiResponse("");
   setSelectionExpanded(false);
   setOverlappingTargetIds([]);
   setActiveFollowUpConcept("");
@@ -489,11 +699,9 @@ function handleTextSelected(target: TextAnnotationTarget) {
     setOverlappingTargetIds([]);
     setActiveFollowUpConcept("");
     setExpandedFollowUpConcepts({});
+    setAiResponse("");
+    setActiveConversation(null);
     setQuestionTurns([]);
-
-    setAiResponse(
-      `Region selected on page ${region.pageNumber}.\n\nFor now, the cropped image opens in a new tab. Later, this region will be sent to a vision-capable AI model.`
-    );
   }
 
 async function handleExplainSelection() {
@@ -814,7 +1022,7 @@ async function handleExplainRelatedConcept(concept: string) {
               className="h-6 min-w-12 rounded px-1.5 text-xs tabular-nums text-slate-600 hover:bg-white hover:text-slate-900"
               aria-label="Reset zoom"
             >
-              {Math.round(pdfZoom * 100)}%
+              {Math.round(pdfVisualZoom * 100)}%
             </button>
 
             <button
@@ -845,6 +1053,7 @@ async function handleExplainRelatedConcept(concept: string) {
   selectionTool={selectionTool}
   annotations={annotations}
   zoom={pdfZoom}
+  visualZoom={pdfVisualZoom}
   targetToReveal={targetToReveal}
   currentSelection={currentSelection}
   onPageStatusChange={handlePdfPageStatusChange}
@@ -1375,7 +1584,7 @@ async function handleExplainRelatedConcept(concept: string) {
       </section>
     </div>
   ) : (
-    "Explanations will appear here."
+    getAiExplanationEmptyMessage(currentSelection)
   )}
 </div>
             </section>
@@ -1483,7 +1692,10 @@ async function handleExplainRelatedConcept(concept: string) {
                 </button>
 
                 {historyAnnotationsExpanded && (
-                  <div className="mt-1 space-y-1.5">
+                  <div
+                    className="mt-1 space-y-1.5"
+                    onMouseLeave={restoreHistoryAnnotationPreview}
+                  >
                     {historyAnnotations.length === 0 ? (
                       <p className="px-1 py-2 text-xs text-slate-400">
                         No annotations yet.
@@ -1495,7 +1707,6 @@ async function handleExplainRelatedConcept(concept: string) {
                           onMouseEnter={() =>
                             previewHistoryAnnotation(annotation.target.id)
                           }
-                          onMouseLeave={restoreHistoryAnnotationPreview}
                           onClick={() => handleAnnotationClick(annotation)}
                           className="w-full rounded-lg border border-slate-100 bg-slate-50 p-2 text-left transition hover:border-slate-200 hover:bg-white"
                         >

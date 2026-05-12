@@ -36,6 +36,15 @@ Set production mode in `deployment.json`:
 }
 ```
 
+The Docker frontend build also pins browser API calls to:
+
+```txt
+https://novicereader.com
+```
+
+If you deploy under a different domain, update `NEXT_PUBLIC_API_BASE_URL` in
+`compose.yaml` before rebuilding.
+
 Create the backend env file on the server:
 
 ```bash

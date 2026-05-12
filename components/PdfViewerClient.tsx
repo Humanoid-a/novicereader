@@ -29,6 +29,7 @@ type PdfViewerClientProps = {
     targetId: string;
     nonce: number;
     behavior?: ScrollBehavior;
+    animation?: "fast";
     trackVisualPosition?: boolean;
   } | null;
   currentSelection?: TextAnnotationTarget | RegionAnnotationTarget | null;
@@ -50,6 +51,14 @@ type DraftRegion = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function easeOutCubic(progress: number) {
+  return 1 - Math.pow(1 - progress, 3);
+}
+
+function getFastScrollDuration(distance: number) {
+  return Math.min(Math.max(distance / 6, 120), 220);
 }
 
 function mergeTextSelectionChunks(
@@ -386,7 +395,77 @@ export default function PdfViewerClient({
 
   const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const lastRevealKeyRef = useRef<string | null>(null);
+  const revealAnimationFrameRef = useRef<number | null>(null);
   const visiblePageRatios = useRef<Record<number, number>>({});
+
+  function cancelRevealAnimation() {
+    if (revealAnimationFrameRef.current === null) {
+      return;
+    }
+
+    window.cancelAnimationFrame(revealAnimationFrameRef.current);
+    revealAnimationFrameRef.current = null;
+  }
+
+  function scrollToDisplayedTarget(
+    scrollContainer: HTMLElement,
+    targetScrollPosition: { left: number; top: number },
+    targetAnimation: "fast" | undefined,
+    targetBehavior: ScrollBehavior | undefined
+  ) {
+    cancelRevealAnimation();
+
+    const maxLeft = Math.max(
+      scrollContainer.scrollWidth - scrollContainer.clientWidth,
+      0
+    );
+    const maxTop = Math.max(
+      scrollContainer.scrollHeight - scrollContainer.clientHeight,
+      0
+    );
+    const nextLeft = clamp(targetScrollPosition.left, 0, maxLeft);
+    const nextTop = clamp(targetScrollPosition.top, 0, maxTop);
+
+    if (targetAnimation !== "fast") {
+      scrollContainer.scrollTo({
+        left: nextLeft,
+        top: nextTop,
+        behavior: targetBehavior ?? "smooth",
+      });
+      return;
+    }
+
+    const startLeft = scrollContainer.scrollLeft;
+    const startTop = scrollContainer.scrollTop;
+    const deltaLeft = nextLeft - startLeft;
+    const deltaTop = nextTop - startTop;
+    const distance = Math.hypot(deltaLeft, deltaTop);
+
+    if (distance < 1) {
+      return;
+    }
+
+    const duration = getFastScrollDuration(distance);
+    const startTime = window.performance.now();
+
+    function animateScroll(now: number) {
+      const progress = clamp((now - startTime) / duration, 0, 1);
+      const easedProgress = easeOutCubic(progress);
+
+      scrollContainer.scrollLeft = startLeft + deltaLeft * easedProgress;
+      scrollContainer.scrollTop = startTop + deltaTop * easedProgress;
+
+      if (progress < 1) {
+        revealAnimationFrameRef.current =
+          window.requestAnimationFrame(animateScroll);
+      } else {
+        revealAnimationFrameRef.current = null;
+      }
+    }
+
+    revealAnimationFrameRef.current =
+      window.requestAnimationFrame(animateScroll);
+  }
 
   useEffect(() => {
     if (numPages === 0 || typeof IntersectionObserver === "undefined") {
@@ -437,8 +516,21 @@ export default function PdfViewerClient({
 
   useEffect(() => {
     if (!targetToReveal) {
+      cancelRevealAnimation();
+      lastRevealKeyRef.current = null;
       return;
     }
+
+    const revealKey = `${targetToReveal.targetId}:${targetToReveal.nonce}`;
+
+    if (
+      !targetToReveal.trackVisualPosition &&
+      lastRevealKeyRef.current === revealKey
+    ) {
+      return;
+    }
+
+    lastRevealKeyRef.current = revealKey;
 
     const annotation = annotations.find(
       (annotation) => annotation.target.id === targetToReveal.targetId
@@ -475,7 +567,10 @@ export default function PdfViewerClient({
 
     if (!bounds || !scrollContainer) {
       pageElement.scrollIntoView({
-        behavior: targetToReveal.behavior ?? "smooth",
+        behavior:
+          targetToReveal.animation === "fast"
+            ? "smooth"
+            : (targetToReveal.behavior ?? "smooth"),
         block: "center",
       });
       return;
@@ -483,17 +578,27 @@ export default function PdfViewerClient({
 
     const pageRect = pageElement.getBoundingClientRect();
     const scrollContainerRect = scrollContainer.getBoundingClientRect();
-    const targetTop =
+    const targetCenterX =
+      scrollContainer.scrollLeft +
+      pageRect.left -
+      scrollContainerRect.left +
+      (bounds.x + bounds.width / 2) * pageRect.width;
+    const targetCenterY =
       scrollContainer.scrollTop +
       pageRect.top -
       scrollContainerRect.top +
-      bounds.y * pageRect.height;
+      (bounds.y + bounds.height / 2) * pageRect.height;
 
-    scrollContainer.scrollTo({
-      top: Math.max(targetTop - scrollContainer.clientHeight * 0.35, 0),
-      behavior: targetToReveal.behavior ?? "smooth",
-    });
-  }, [annotations, currentSelection, targetToReveal]);
+    scrollToDisplayedTarget(
+      scrollContainer,
+      {
+        left: targetCenterX - scrollContainer.clientWidth * 0.5,
+        top: targetCenterY - scrollContainer.clientHeight * 0.38,
+      },
+      targetToReveal.animation,
+      targetToReveal.behavior
+    );
+  }, [annotations, currentSelection, targetToReveal, visualZoom]);
 
   function handleTextMouseUp() {
   if (selectionTool !== "highlight") {

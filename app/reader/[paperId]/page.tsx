@@ -11,6 +11,7 @@ import { createId } from "@/lib/id";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import PdfViewer from "@/components/PdfViewer";
+import ReaderGuide from "@/components/ReaderGuide";
 import RichAiText from "@/components/RichAiText";
 import {
   askAiQuestion,
@@ -144,9 +145,93 @@ function getAiExplanationEmptyMessage(selection: AnnotationTarget | null) {
 const PDF_ZOOM_MIN = 0.5;
 const PDF_ZOOM_MAX = 1.6;
 const PDF_ZOOM_STEP = 0.1;
+const GUIDE_DEMO_REGION_IMAGE_SRC = "/guide/demo-region.png";
+const GUIDE_DEMO_CREATED_AT = "2026-01-01T00:00:00.000Z";
+const GUIDE_DEMO_TEXT =
+  "The model repeatedly updates a hidden state so it can spend more reasoning effort before producing the answer.";
+const GUIDE_DEMO_EXPLANATION =
+  "This means the paper is saying the model can do extra internal work before answering. Instead of only writing a longer response, it repeats an internal update step so the hidden state can gradually become more useful for the final answer.";
+const GUIDE_DEMO_REGION_EXPLANATION =
+  "This is a demo region annotation. For figures, equations, or tables, NoviceReader can keep the cropped area as the selected context so you can ask for an explanation or ask AI a more specific question about it.";
+const GUIDE_DEMO_FOLLOW_UP_POINTS = [
+  "What is a hidden state?",
+  "Why can more tokens increase reasoning compute?",
+  "What is a recurrent step?",
+];
+const GUIDE_DEMO_REGION_FOLLOW_UP_POINTS = [
+  "How should I read this selected region?",
+  "What details matter in a figure or equation?",
+];
+const GUIDE_DEMO_TEXT_TARGET: TextAnnotationTarget = {
+  type: "text",
+  id: "guide-demo-text-target",
+  text: GUIDE_DEMO_TEXT,
+  chunks: [
+    {
+      id: "guide-demo-text-chunk",
+      pageNumber: 1,
+      text: GUIDE_DEMO_TEXT,
+      rect: {
+        pageNumber: 1,
+        x: 0.16,
+        y: 0.18,
+        width: 0.58,
+        height: 0.035,
+      },
+    },
+  ],
+  createdAt: GUIDE_DEMO_CREATED_AT,
+};
+const GUIDE_DEMO_REGION_TARGET: RegionAnnotationTarget = {
+  type: "region",
+  id: "guide-demo-region-target",
+  pageNumber: 1,
+  rect: {
+    x: 0.18,
+    y: 0.28,
+    width: 0.42,
+    height: 0.18,
+  },
+  imageDataUrl: GUIDE_DEMO_REGION_IMAGE_SRC,
+  createdAt: GUIDE_DEMO_CREATED_AT,
+};
 
 function clampPdfZoom(zoom: number) {
   return Math.min(Math.max(zoom, PDF_ZOOM_MIN), PDF_ZOOM_MAX);
+}
+
+function isGuideDemoAnnotation(annotation: AiAnnotation | null) {
+  return Boolean(annotation?.id.startsWith("guide-demo-annotation"));
+}
+
+function buildGuideDemoAnnotation(
+  paper: PaperWithUrls,
+  target: AnnotationTarget,
+  kind: "text" | "region"
+): AiAnnotation {
+  const isTextDemo = kind === "text";
+  const mainExplanation = isTextDemo
+    ? GUIDE_DEMO_EXPLANATION
+    : GUIDE_DEMO_REGION_EXPLANATION;
+
+  return {
+    id: `guide-demo-annotation-${kind}`,
+    paperId: paper.id,
+    userId: paper.userId,
+    target,
+    prompt: "Demo guide annotation",
+    response: mainExplanation,
+    explanation: {
+      mainExplanation,
+      knowledgePoints: [],
+      followUpConversation: [],
+      relatedConcepts: isTextDemo
+        ? GUIDE_DEMO_FOLLOW_UP_POINTS
+        : GUIDE_DEMO_REGION_FOLLOW_UP_POINTS,
+      followUpExplanations: [],
+    },
+    createdAt: GUIDE_DEMO_CREATED_AT,
+  };
 }
 
 export default function ReaderPage() {
@@ -163,6 +248,23 @@ export default function ReaderPage() {
     visualZoom: number;
   } | null>(null);
   const targetRevealNonceRef = useRef(0);
+  const readerGuideTimersRef = useRef<number[]>([]);
+  const readerGuideSnapshotRef = useRef<{
+    selectionTool: SelectionTool;
+    rightPanelView: "annotations" | "history";
+    currentSelection: AnnotationTarget | null;
+    selectedAnnotation: AiAnnotation | null;
+    selectionExpanded: boolean;
+    overlappingTargetIds: string[];
+    prompt: string;
+    aiResponse: string;
+    activeFollowUpConcept: string;
+    expandedFollowUpConcepts: Record<string, boolean>;
+    followUpErrors: Record<string, string>;
+    relatedConversationsExpanded: boolean;
+    activeConversation: QuestionConversation | null;
+    questionTurns: QuestionAnswerTurn[];
+  } | null>(null);
 
   const [paper, setPaper] = useState<PaperWithUrls | null>(null);
   const [annotations, setAnnotations] = useState<AiAnnotation[]>([]);
@@ -174,6 +276,7 @@ export default function ReaderPage() {
     targetId: string;
     nonce: number;
     behavior?: ScrollBehavior;
+    animation?: "fast";
     trackVisualPosition?: boolean;
   } | null>(null);
 
@@ -226,6 +329,11 @@ const [isDeletingAnnotation, setIsDeletingAnnotation] = useState(false);
     Record<string, boolean>
   >({});
   const [error, setError] = useState("");
+  const [isReaderGuideOpen, setIsReaderGuideOpen] = useState(false);
+  const [guideDemoAnnotation, setGuideDemoAnnotation] =
+    useState<AiAnnotation | null>(null);
+  const [isGuideToolSwitchAnimating, setIsGuideToolSwitchAnimating] =
+    useState(false);
 
 useEffect(() => {
   document.title = paper
@@ -414,8 +522,200 @@ useEffect(() => {
 }, [isLoading, paper?.fileUrl]);
 
 
+const clearReaderGuideTimers = useCallback(() => {
+  for (const timerId of readerGuideTimersRef.current) {
+    window.clearTimeout(timerId);
+  }
+
+  readerGuideTimersRef.current = [];
+}, []);
+
+const queueReaderGuideTimer = useCallback(
+  (callback: () => void, delayMs: number) => {
+    const timerId = window.setTimeout(() => {
+      readerGuideTimersRef.current = readerGuideTimersRef.current.filter(
+        (queuedTimerId) => queuedTimerId !== timerId
+      );
+      callback();
+    }, delayMs);
+
+    readerGuideTimersRef.current.push(timerId);
+  },
+  []
+);
+
+useEffect(() => {
+  return () => {
+    clearReaderGuideTimers();
+  };
+}, [clearReaderGuideTimers]);
+
+const revealGuideDemoTarget = useCallback((targetId: string) => {
+  targetRevealNonceRef.current += 1;
+  setTargetToReveal({
+    targetId,
+    nonce: targetRevealNonceRef.current,
+    behavior: "smooth",
+  });
+}, []);
+
+const closeReaderGuide = useCallback(() => {
+  clearReaderGuideTimers();
+
+  const snapshot = readerGuideSnapshotRef.current;
+
+  if (snapshot) {
+    setSelectionTool(snapshot.selectionTool);
+    setRightPanelView(snapshot.rightPanelView);
+    setCurrentSelection(snapshot.currentSelection);
+    setSelectedAnnotation(snapshot.selectedAnnotation);
+    setSelectionExpanded(snapshot.selectionExpanded);
+    setOverlappingTargetIds(snapshot.overlappingTargetIds);
+    setPrompt(snapshot.prompt);
+    setAiResponse(snapshot.aiResponse);
+    setActiveFollowUpConcept(snapshot.activeFollowUpConcept);
+    setExpandedFollowUpConcepts(snapshot.expandedFollowUpConcepts);
+    setFollowUpErrors(snapshot.followUpErrors);
+    setRelatedConversationsExpanded(snapshot.relatedConversationsExpanded);
+    setActiveConversation(snapshot.activeConversation);
+    setQuestionTurns(snapshot.questionTurns);
+  }
+
+  readerGuideSnapshotRef.current = null;
+  setGuideDemoAnnotation(null);
+  setIsGuideToolSwitchAnimating(false);
+  setAnnotationToDelete(null);
+  setTargetToReveal(null);
+  setIsReaderGuideOpen(false);
+}, [clearReaderGuideTimers]);
+
+const handleReaderGuideStepChange = useCallback(
+  (stepIndex: number) => {
+    if (!paper) {
+      return;
+    }
+
+    clearReaderGuideTimers();
+    setRightPanelView("annotations");
+    setAnnotationToDelete(null);
+    setSelectionExpanded(false);
+    setOverlappingTargetIds([]);
+    setActiveFollowUpConcept("");
+    setExpandedFollowUpConcepts({});
+    setFollowUpErrors({});
+    setRelatedConversationsExpanded(false);
+    setActiveConversation(null);
+    setQuestionTurns([]);
+    setPrompt("");
+    setPromptFocused(false);
+    setIsGuideToolSwitchAnimating(false);
+
+    if (stepIndex === 0 || stepIndex === 1) {
+      setSelectionTool("highlight");
+      setGuideDemoAnnotation(null);
+      setCurrentSelection(GUIDE_DEMO_TEXT_TARGET);
+      setSelectedAnnotation(null);
+      setAiResponse("");
+      return;
+    }
+
+    if (stepIndex === 2) {
+      const demoAnnotation = buildGuideDemoAnnotation(
+        paper,
+        GUIDE_DEMO_TEXT_TARGET,
+        "text"
+      );
+
+      setSelectionTool("highlight");
+      setGuideDemoAnnotation(demoAnnotation);
+      setCurrentSelection(demoAnnotation.target);
+      setSelectedAnnotation(demoAnnotation);
+      setAiResponse(demoAnnotation.explanation.mainExplanation);
+      revealGuideDemoTarget(demoAnnotation.target.id);
+      return;
+    }
+
+    if (stepIndex === 3) {
+      setSelectionTool("highlight");
+      setGuideDemoAnnotation(null);
+      setCurrentSelection(null);
+      setSelectedAnnotation(null);
+      setAiResponse("");
+      setIsGuideToolSwitchAnimating(true);
+
+      queueReaderGuideTimer(() => {
+        setSelectionTool("region");
+      }, 360);
+
+      queueReaderGuideTimer(() => {
+        setCurrentSelection(GUIDE_DEMO_REGION_TARGET);
+        revealGuideDemoTarget(GUIDE_DEMO_REGION_TARGET.id);
+      }, 720);
+
+      queueReaderGuideTimer(() => {
+        setIsGuideToolSwitchAnimating(false);
+      }, 1100);
+      return;
+    }
+
+    if (stepIndex === 4) {
+      setSelectionTool("region");
+      setGuideDemoAnnotation(null);
+      setCurrentSelection(null);
+      setSelectedAnnotation(null);
+      setAiResponse("");
+      return;
+    }
+
+    const demoAnnotation = buildGuideDemoAnnotation(
+      paper,
+      GUIDE_DEMO_REGION_TARGET,
+      "region"
+    );
+
+    setSelectionTool("region");
+    setGuideDemoAnnotation(demoAnnotation);
+    setCurrentSelection(demoAnnotation.target);
+    setSelectedAnnotation(demoAnnotation);
+    setAiResponse(demoAnnotation.explanation.mainExplanation);
+    revealGuideDemoTarget(demoAnnotation.target.id);
+  },
+  [
+    clearReaderGuideTimers,
+    paper,
+    queueReaderGuideTimer,
+    revealGuideDemoTarget,
+  ]
+);
+
+function startReaderGuide() {
+  readerGuideSnapshotRef.current = {
+    selectionTool,
+    rightPanelView,
+    currentSelection,
+    selectedAnnotation,
+    selectionExpanded,
+    overlappingTargetIds,
+    prompt,
+    aiResponse,
+    activeFollowUpConcept,
+    expandedFollowUpConcepts,
+    followUpErrors,
+    relatedConversationsExpanded,
+    activeConversation,
+    questionTurns,
+  };
+  setRightPanelView("annotations");
+  setIsReaderGuideOpen(true);
+}
+
 function requestDeleteSelectedAnnotation() {
   if (!selectedAnnotation) {
+    return;
+  }
+
+  if (isGuideDemoAnnotation(selectedAnnotation)) {
+    closeReaderGuide();
     return;
   }
 
@@ -482,6 +782,7 @@ function previewHistoryAnnotation(targetId: string) {
     targetId,
     nonce: targetRevealNonceRef.current,
     behavior: "auto",
+    animation: "fast",
     trackVisualPosition: true,
   });
 }
@@ -939,6 +1240,14 @@ async function handleExplainRelatedConcept(concept: string) {
   const hasAiPanelContent = Boolean(aiResponse) || hasQuestionTurns || isAskingQuestion;
   const historyAnnotations = getNewestAnnotationsByTarget(annotations);
   const historyConversations = sortConversationsNewestFirst(allConversations);
+  const visibleAnnotations = guideDemoAnnotation
+    ? [
+        guideDemoAnnotation,
+        ...annotations.filter(
+          (annotation) => annotation.target.id !== guideDemoAnnotation.target.id
+        ),
+      ]
+    : annotations;
   const relatedConversations =
     currentSelection
       ? historyConversations.filter((conversation) =>
@@ -1035,23 +1344,48 @@ async function handleExplainRelatedConcept(concept: string) {
           </div>
         </div>
 
-        <Link
-          href="/"
-          className="justify-self-end rounded-md border px-3 py-1.5 text-xs hover:bg-slate-50"
-        >
-          Upload another PDF
-        </Link>
+        <div className="flex justify-self-end items-center gap-2">
+          <button
+            type="button"
+            onClick={startReaderGuide}
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.8"
+            >
+              <circle cx="12" cy="12" r="8" />
+              <path d="M10.2 9.5a2 2 0 1 1 3.3 1.5c-.9.7-1.5 1.2-1.5 2.4" />
+              <path d="M12 16.7h.01" />
+            </svg>
+            Guide
+          </button>
+
+          <Link
+            href="/"
+            className="rounded-md border px-3 py-1.5 text-xs hover:bg-slate-50"
+          >
+            Upload another PDF
+          </Link>
+        </div>
       </header>
 
       <div className="relative grid h-[calc(100vh-49px)] grid-cols-[minmax(0,1fr)_305px] gap-3 p-3">
        <section
          ref={pdfScrollContainerRef}
+         data-guide="pdf-viewer"
          className="min-w-0 overflow-auto rounded-2xl bg-slate-200 p-2 shadow-sm"
        >
          <PdfViewer
   fileUrl={paper.fileUrl}
   selectionTool={selectionTool}
-  annotations={annotations}
+  annotations={visibleAnnotations}
   zoom={pdfZoom}
   visualZoom={pdfVisualZoom}
   targetToReveal={targetToReveal}
@@ -1064,8 +1398,17 @@ async function handleExplainRelatedConcept(concept: string) {
 />
         </section>
 
-        <div className="pointer-events-none absolute right-[329px] top-5 z-20">
-          <div className="pointer-events-auto flex flex-col gap-1 rounded-lg border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur">
+        <div
+          data-guide="selection-toolbox"
+          className="pointer-events-none absolute right-[329px] top-5 z-20"
+        >
+          <div
+            className={`pointer-events-auto flex flex-col gap-1 rounded-lg border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur transition ${
+              isGuideToolSwitchAnimating
+                ? "ring-2 ring-sky-300 ring-offset-2 ring-offset-slate-100"
+                : ""
+            }`}
+          >
             <button
               onClick={() => setSelectionTool("highlight")}
               className={`flex h-8 w-8 items-center justify-center rounded-md transition ${
@@ -1162,7 +1505,7 @@ async function handleExplainRelatedConcept(concept: string) {
     Selection
   </h2>
 
-  <div className="flex items-center gap-2">
+  <div data-guide="selection-actions" className="flex items-center gap-2">
     {overlappingTargetAnnotations.length > 1 && (
       <div className="flex items-center gap-1 text-[11px] text-slate-400">
         <button
@@ -1279,6 +1622,7 @@ async function handleExplainRelatedConcept(concept: string) {
 </div>
 
               <div
+  data-guide="selection-preview"
   className={`rounded-lg bg-slate-100 p-2 text-xs leading-5 text-slate-700 ${
     selectionExpanded ? "max-h-40" : "max-h-20"
   } overflow-auto`}
@@ -1309,6 +1653,7 @@ async function handleExplainRelatedConcept(concept: string) {
               </div>
 
             <button
+  data-guide="explain-selection"
   onClick={handleExplainSelection}
   disabled={!currentSelection || isExplaining || isSavingAnnotation}
   className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
@@ -1380,7 +1725,10 @@ async function handleExplainRelatedConcept(concept: string) {
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-auto rounded-lg bg-slate-100 p-3 text-sm leading-6 text-slate-700">
+              <div
+                data-guide="ai-response"
+                className="min-h-0 flex-1 overflow-auto rounded-lg bg-slate-100 p-3 text-sm leading-6 text-slate-700"
+              >
   {isExplaining ? (
     <LoadingDots />
   ) : hasAiPanelContent ? (
@@ -1590,7 +1938,7 @@ async function handleExplainRelatedConcept(concept: string) {
             </section>
           </div>
 
-          <div className="border-t bg-white p-2">
+          <div data-guide="ask-ai-panel" className="border-t bg-white p-2">
             {activeConversation ? (
               <div className="mb-2 rounded-lg border-l-2 border-slate-300 bg-slate-50 px-2 py-1.5 text-xs text-slate-500">
                 <div className="mb-1 flex items-center justify-between gap-2">
@@ -1797,6 +2145,12 @@ async function handleExplainRelatedConcept(concept: string) {
           )}
         </aside>
             </div>
+
+      <ReaderGuide
+        isOpen={isReaderGuideOpen}
+        onClose={closeReaderGuide}
+        onStepChange={handleReaderGuideStepChange}
+      />
 
       {annotationToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

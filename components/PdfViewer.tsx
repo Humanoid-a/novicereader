@@ -23,6 +23,7 @@ type PdfViewerProps = {
     targetId: string;
     nonce: number;
     behavior?: ScrollBehavior;
+    animation?: "fast";
     trackVisualPosition?: boolean;
   } | null;
   currentSelection?: TextAnnotationTarget | RegionAnnotationTarget | null;

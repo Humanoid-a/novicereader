@@ -55,14 +55,7 @@ def get_default_frontend_origin_regex() -> str | None:
     if deployment_config.isBuiltDeployment:
         return None
 
-    return (
-        r"^http://("
-        r"localhost|127\.0\.0\.1|0\.0\.0\.0|"
-        r"10\.\d+\.\d+\.\d+|"
-        r"172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|"
-        r"192\.168\.\d+\.\d+"
-        r")(:\d+)?$"
-    )
+    return r"^https?://[^/]+$"
 
 
 class Settings(BaseModel):

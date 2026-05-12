@@ -28,5 +28,25 @@
     "sizeBytes": 12489558,
     "createdAt": "2026-05-11T10:06:39.095373+00:00",
     "updatedAt": "2026-05-11T10:06:39.095373+00:00"
+  },
+  {
+    "id": "ba352547-291f-4ac4-9caa-d26556ebb6b1",
+    "userId": "novicereader",
+    "originalFilename": "final_version.pdf",
+    "storedFilename": "original.pdf",
+    "contentType": "application/pdf",
+    "sizeBytes": 1711928,
+    "createdAt": "2026-05-12T08:07:39.481008+00:00",
+    "updatedAt": "2026-05-12T08:07:39.481008+00:00"
+  },
+  {
+    "id": "2da2b464-3dcb-4f9b-b6db-88820e7989b0",
+    "userId": "novicereader",
+    "originalFilename": "final_version.pdf",
+    "storedFilename": "original.pdf",
+    "contentType": "application/pdf",
+    "sizeBytes": 1711928,
+    "createdAt": "2026-05-12T12:37:47.327660+00:00",
+    "updatedAt": "2026-05-12T12:37:47.327660+00:00"
   }
 ]

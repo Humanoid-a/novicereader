@@ -1,23 +1,5 @@
 [
   {
-    "id": "test-user-001",
-    "displayName": "Test User",
-    "knowledgeProfile": {
-      "educationLevel": "high_school",
-      "assumedFromEmptyOnboarding": true,
-      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
-      "knownCourses": [],
-      "knownConcepts": [],
-      "knownDomains": [],
-      "learningGoals": [],
-      "weakAreas": [],
-      "explanationPreference": "beginner-friendly",
-      "explanationDepth": "gentle"
-    },
-    "createdAt": "2026-05-09T12:12:20.306012+00:00",
-    "updatedAt": "2026-05-09T12:12:20.306012+00:00"
-  },
-  {
     "id": "novicereader",
     "username": "novicereader",
     "displayName": "Andy Wang",
@@ -37,43 +19,5 @@
     "updatedAt": "2026-05-11T09:41:52.783361+00:00",
     "passwordHash": "$argon2id$v=19$m=65536,t=3,p=4$f4/emNuB/MS72VPmZERfXw$88ovQmWt8rohe+g73nHmlywaQEXYGdSH+RFqjt5/qNE",
     "disabled": false
-  },
-  {
-    "id": "guest-e842d8084a95456a8255fc4c",
-    "username": "guest-e842d8084a95456a8255fc4c",
-    "displayName": "Guest",
-    "knowledgeProfile": {
-      "educationLevel": "high_school",
-      "assumedFromEmptyOnboarding": true,
-      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
-      "knownCourses": [],
-      "knownConcepts": [],
-      "knownDomains": [],
-      "learningGoals": [],
-      "weakAreas": [],
-      "explanationPreference": "beginner-friendly",
-      "explanationDepth": "gentle"
-    },
-    "createdAt": "2026-05-13T02:19:34.666895+00:00",
-    "updatedAt": "2026-05-13T02:19:34.666895+00:00"
-  },
-  {
-    "id": "guest-64602e73baa94d4ea14d5dec",
-    "username": "guest-64602e73baa94d4ea14d5dec",
-    "displayName": "Guest",
-    "knowledgeProfile": {
-      "educationLevel": "high_school",
-      "assumedFromEmptyOnboarding": true,
-      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
-      "knownCourses": [],
-      "knownConcepts": [],
-      "knownDomains": [],
-      "learningGoals": [],
-      "weakAreas": [],
-      "explanationPreference": "beginner-friendly",
-      "explanationDepth": "gentle"
-    },
-    "createdAt": "2026-05-13T02:42:27.306368+00:00",
-    "updatedAt": "2026-05-13T02:42:27.306368+00:00"
   }
 ]

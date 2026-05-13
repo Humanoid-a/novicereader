@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { registerUser } from "@/lib/api";
+import { endGuestServerSession } from "@/lib/guestSession";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -26,6 +27,7 @@ export default function RegisterPage() {
         registrationCode,
         displayName,
       });
+      await endGuestServerSession();
       router.replace("/");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to register");

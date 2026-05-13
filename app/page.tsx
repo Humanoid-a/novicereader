@@ -12,6 +12,14 @@ import {
   listPapers,
   uploadPaper,
 } from "@/lib/api";
+import {
+  deleteGuestPaper,
+  endGuestServerSession,
+  getGuestUserProfile,
+  isGuestSessionActive,
+  listGuestPapers,
+  uploadGuestPaper,
+} from "@/lib/guestSession";
 import type { PaperWithUrls } from "@/types/paper";
 import type { UserProfile } from "@/types/user";
 
@@ -122,6 +130,7 @@ export default function HomePage() {
   const dragDepthRef = useRef(0);
 
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isGuestMode, setIsGuestMode] = useState(false);
   const [papers, setPapers] = useState<PaperWithUrls[]>([]);
   const [showAllPapers, setShowAllPapers] = useState(false);
   const [isLoadingPapers, setIsLoadingPapers] = useState(true);
@@ -131,18 +140,29 @@ export default function HomePage() {
   const [selectedPaperIds, setSelectedPaperIds] = useState<string[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] =
     useState<DeleteConfirmation>(null);
+  const [pendingGuestUploadFile, setPendingGuestUploadFile] =
+    useState<File | null>(null);
   const [draggedDocument, setDraggedDocument] =
     useState<DraggedDocument | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
+    const hasStoredAuthToken = Boolean(getStoredAuthToken());
+    const hasGuestSession = isGuestSessionActive();
 
-    if (!getStoredAuthToken()) {
+    if (!hasStoredAuthToken && !hasGuestSession) {
       router.replace("/login");
       return () => {
         isMounted = false;
       };
+    }
+
+    if (hasGuestSession && !hasStoredAuthToken) {
+      setIsGuestMode(true);
+      setCurrentUser(getGuestUserProfile());
+    } else {
+      setIsGuestMode(false);
     }
 
     async function loadDashboard() {
@@ -150,6 +170,22 @@ export default function HomePage() {
       setError("");
 
       try {
+        if (hasGuestSession && !hasStoredAuthToken) {
+          const loadedPapers = await listGuestPapers();
+
+          if (isMounted) {
+            setPapers(
+              [...loadedPapers].sort(
+                (left, right) =>
+                  new Date(right.updatedAt).getTime() -
+                  new Date(left.updatedAt).getTime(),
+              ),
+            );
+          }
+
+          return;
+        }
+
         const [loadedUser, loadedPapers] = await Promise.all([
           getCurrentUser(),
           listPapers(),
@@ -169,8 +205,12 @@ export default function HomePage() {
         console.error(error);
 
         if (isMounted) {
-          clearStoredAuthSession();
-          router.replace("/login");
+          if (hasGuestSession && !hasStoredAuthToken) {
+            setError("Failed to load guest papers.");
+          } else {
+            clearStoredAuthSession();
+            router.replace("/login");
+          }
         }
       } finally {
         if (isMounted) {
@@ -186,19 +226,40 @@ export default function HomePage() {
     };
   }, [router]);
 
+  useEffect(() => {
+    if (!isGuestMode || papers.length === 0) {
+      return;
+    }
+
+    function warnBeforeLeaving(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeLeaving);
+    };
+  }, [isGuestMode, papers.length]);
+
   async function handlePdfUpload(file: File) {
     setIsUploading(true);
     setError("");
 
     try {
-      const paper = await uploadPaper(file);
+      const paper = isGuestMode
+        ? await uploadGuestPaper(file)
+        : await uploadPaper(file);
       router.push(`/reader/${paper.id}`);
     } catch (error) {
       console.error(error);
       setError(
         error instanceof Error
           ? error.message
-          : "Failed to upload PDF. Make sure the backend is running.",
+          : isGuestMode
+            ? "Failed to upload this PDF for the guest session."
+            : "Failed to upload PDF. Make sure the backend is running.",
       );
     } finally {
       setIsUploading(false);
@@ -207,6 +268,33 @@ export default function HomePage() {
         fileInputRef.current.value = "";
       }
     }
+  }
+
+  function requestPdfUpload(file: File) {
+    if (isGuestMode) {
+      setPendingGuestUploadFile(file);
+      return;
+    }
+
+    handlePdfUpload(file);
+  }
+
+  function cancelGuestUpload() {
+    setPendingGuestUploadFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function confirmGuestUpload() {
+    if (!pendingGuestUploadFile) {
+      return;
+    }
+
+    const file = pendingGuestUploadFile;
+    setPendingGuestUploadFile(null);
+    handlePdfUpload(file);
   }
 
   function handleLibraryDragEnter(event: DragEvent<HTMLElement>) {
@@ -270,11 +358,16 @@ export default function HomePage() {
       return;
     }
 
-    handlePdfUpload(pdfFile);
+    requestPdfUpload(pdfFile);
   }
 
-  function handleLogout() {
-    clearStoredAuthSession();
+  async function handleLogout() {
+    if (isGuestMode) {
+      await endGuestServerSession();
+    } else {
+      clearStoredAuthSession();
+    }
+
     router.replace("/login");
   }
 
@@ -292,7 +385,11 @@ export default function HomePage() {
     setError("");
 
     try {
-      await deletePaper(paper.id);
+      if (isGuestMode) {
+        await deleteGuestPaper(paper.id);
+      } else {
+        await deletePaper(paper.id);
+      }
       setPapers((currentPapers) =>
         currentPapers.filter((currentPaper) => currentPaper.id !== paper.id),
       );
@@ -342,7 +439,11 @@ export default function HomePage() {
 
     try {
       for (const paperId of selectedIds) {
-        await deletePaper(paperId);
+        if (isGuestMode) {
+          await deleteGuestPaper(paperId);
+        } else {
+          await deletePaper(paperId);
+        }
       }
 
       setPapers((currentPapers) =>
@@ -384,8 +485,12 @@ export default function HomePage() {
         }?`;
   const deleteConfirmationMessage =
     deleteConfirmation?.type === "single"
-      ? "This will remove the document and its saved reader data."
-      : "This will remove the selected documents and their saved reader data.";
+      ? isGuestMode
+        ? "This will remove the guest document and its local browser backup."
+        : "This will remove the document and its saved reader data."
+      : isGuestMode
+        ? "This will remove the selected guest documents and their local browser backups."
+        : "This will remove the selected documents and their saved reader data.";
 
   return (
     <main className="min-h-screen bg-slate-100">
@@ -404,7 +509,7 @@ export default function HomePage() {
                 {currentUser?.displayName || "Loading"}
               </div>
               <div className="text-[11px] text-slate-500">
-                {currentUser?.username || ""}
+                {isGuestMode ? "Guest session" : currentUser?.username || ""}
               </div>
             </div>
           </div>
@@ -413,7 +518,7 @@ export default function HomePage() {
             onClick={handleLogout}
             className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
           >
-            Log out
+            {isGuestMode ? "Exit guest session" : "Log out"}
           </button>
         </div>
       </header>
@@ -423,8 +528,15 @@ export default function HomePage() {
           <div>
             <p className="text-sm font-medium text-slate-500">NoviceReader</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-normal text-slate-950">
-              Your Papers
+              {isGuestMode ? "Guest Papers" : "Your Papers"}
             </h1>
+            {isGuestMode && (
+              <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
+                Guest PDFs use the normal cloud reader workflow and are also
+                backed up locally in this browser, so this device keeps a local
+                copy of the guest reading data.
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -471,7 +583,7 @@ export default function HomePage() {
                 const selectedFile = event.target.files?.[0];
 
                 if (selectedFile) {
-                  handlePdfUpload(selectedFile);
+                  requestPdfUpload(selectedFile);
                 }
               }}
               className="hidden"
@@ -490,6 +602,14 @@ export default function HomePage() {
         {error && (
           <div className="mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+          </div>
+        )}
+
+        {isGuestMode && (
+          <div className="mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            Uploading as guest uses the cloud reader workflow for AI features
+            and also keeps a local backup in this browser. Guest data is not
+            attached to a registered account.
           </div>
         )}
 
@@ -681,6 +801,61 @@ export default function HomePage() {
           )}
         </div>
       </section>
+
+      {pendingGuestUploadFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <button
+            type="button"
+            aria-label="Cancel guest upload"
+            className="absolute inset-0 bg-slate-950/30"
+            onClick={cancelGuestUpload}
+          />
+
+          <div className="relative w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700">
+                <DocumentIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">
+                  Upload as guest?
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  This PDF will be uploaded for the guest reader workflow and
+                  also backed up locally in this browser. Annotation and
+                  conversation data will work normally and this device keeps a
+                  local guest backup.
+                </p>
+                <div className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600">
+                  <div className="truncate font-medium text-slate-800">
+                    {pendingGuestUploadFile.name}
+                  </div>
+                  <div className="mt-1">
+                    {formatFileSize(pendingGuestUploadFile.size)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelGuestUpload}
+                className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmGuestUpload}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
+              >
+                Upload as guest
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteConfirmation && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">

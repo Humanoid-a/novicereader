@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type MouseEvent,
 } from "react";
 import { createId } from "@/lib/id";
 import { useParams, useRouter } from "next/navigation";
@@ -24,6 +25,17 @@ import {
   listPaperAnnotations,
   listPaperConversations,
 } from "@/lib/api";
+import {
+  askGuestAiQuestion,
+  createGuestPaperAnnotation,
+  deleteGuestAnnotationTarget,
+  explainGuestFollowUpConcept,
+  explainGuestSelection,
+  getGuestPaper,
+  isGuestSessionActive,
+  listGuestAnnotations,
+  listGuestConversations,
+} from "@/lib/guestSession";
 import type { PaperWithUrls } from "@/types/paper";
 import type {
   AiAnnotation,
@@ -267,6 +279,7 @@ export default function ReaderPage() {
   } | null>(null);
 
   const [paper, setPaper] = useState<PaperWithUrls | null>(null);
+  const [isGuestMode, setIsGuestMode] = useState(false);
   const [annotations, setAnnotations] = useState<AiAnnotation[]>([]);
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1);
   const [pdfNumPages, setPdfNumPages] = useState(0);
@@ -354,17 +367,31 @@ useEffect(() => {
     return;
   }
 
-  if (!getStoredAuthToken()) {
+  const hasStoredAuthToken = Boolean(getStoredAuthToken());
+  const hasGuestSession = isGuestSessionActive();
+
+  if (!hasStoredAuthToken && !hasGuestSession) {
     router.replace("/login");
     return;
   }
-
-
 
   async function loadPaperWorkspace() {
     try {
       setIsLoading(true);
 
+      if (hasGuestSession && !hasStoredAuthToken) {
+        const loadedPaper = await getGuestPaper(paperId);
+        const loadedAnnotations = await listGuestAnnotations(paperId);
+        const loadedConversations = await listGuestConversations(paperId);
+
+        setIsGuestMode(true);
+        setPaper(loadedPaper);
+        setAnnotations(loadedAnnotations);
+        setAllConversations(loadedConversations);
+        return;
+      }
+
+      setIsGuestMode(false);
       const loadedPaper = await getPaper(paperId);
       const loadedAnnotations = await listPaperAnnotations(paperId);
       const loadedConversations = await listPaperConversations(paperId);
@@ -382,6 +409,23 @@ useEffect(() => {
 
   loadPaperWorkspace();
 }, [paperId, router]);
+
+useEffect(() => {
+  if (!isGuestMode || !paper) {
+    return;
+  }
+
+  function warnBeforeLeaving(event: BeforeUnloadEvent) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+
+  window.addEventListener("beforeunload", warnBeforeLeaving);
+
+  return () => {
+    window.removeEventListener("beforeunload", warnBeforeLeaving);
+  };
+}, [isGuestMode, paper]);
 
 useEffect(() => {
   const scrollContainer = pdfScrollContainerRef.current;
@@ -766,6 +810,20 @@ function resetPdfZoom() {
   setCommittedPdfZoom(1);
 }
 
+function handleGuestNavigation(event: MouseEvent<HTMLAnchorElement>) {
+  if (!isGuestMode) {
+    return;
+  }
+
+  const shouldLeave = window.confirm(
+    "Guest work is not attached to a registered account. Leave this page?"
+  );
+
+  if (!shouldLeave) {
+    event.preventDefault();
+  }
+}
+
 function previewHistoryAnnotation(targetId: string) {
   const scrollContainer = pdfScrollContainerRef.current;
 
@@ -843,10 +901,17 @@ async function confirmDeleteAnnotation() {
   try {
     setIsDeletingAnnotation(true);
 
-    await deletePaperAnnotationTarget({
-      paperId: paper.id,
-      targetId: deletedTargetId,
-    });
+    if (isGuestMode) {
+      await deleteGuestAnnotationTarget({
+        paperId: paper.id,
+        targetId: deletedTargetId,
+      });
+    } else {
+      await deletePaperAnnotationTarget({
+        paperId: paper.id,
+        targetId: deletedTargetId,
+      });
+    }
 
     setAnnotations((current) =>
       current.filter(
@@ -1019,11 +1084,17 @@ async function handleExplainSelection() {
     setActiveFollowUpConcept("");
     setAiResponse("");
 
-    const result = await explainSelection({
-  paperId: paper.id,
-  target: currentSelection,
-  prompt: explanationPrompt,
-});
+    const result = isGuestMode
+      ? await explainGuestSelection({
+          paperId: paper.id,
+          target: currentSelection,
+          prompt: explanationPrompt,
+        })
+      : await explainSelection({
+          paperId: paper.id,
+          target: currentSelection,
+          prompt: explanationPrompt,
+        });
 
 setAiResponse(result.explanation.mainExplanation);
 
@@ -1041,7 +1112,9 @@ setAiResponse(result.explanation.mainExplanation);
     try {
       setIsSavingAnnotation(true);
 
-      const savedAnnotation = await createPaperAnnotation(paper.id, annotation);
+      const savedAnnotation = isGuestMode
+        ? await createGuestPaperAnnotation(paper.id, annotation)
+        : await createPaperAnnotation(paper.id, annotation);
 
 setAnnotations((current) => [savedAnnotation, ...current]);
 setSelectedAnnotation(savedAnnotation);
@@ -1088,14 +1161,23 @@ async function handleExplainRelatedConcept(concept: string) {
       return next;
     });
 
-    const result = await explainFollowUpConcept({
-      paperId: paper.id,
-      annotationId: selectedAnnotation.id,
-      target: selectedAnnotation.target,
-      annotationPrompt: selectedAnnotation.prompt,
-      annotationExplanation: previousExplanation,
-      followUpPoint: concept,
-    });
+    const result = isGuestMode
+      ? await explainGuestFollowUpConcept({
+          paperId: paper.id,
+          annotationId: selectedAnnotation.id,
+          target: selectedAnnotation.target,
+          annotationPrompt: selectedAnnotation.prompt,
+          annotationExplanation: previousExplanation,
+          followUpPoint: concept,
+        })
+      : await explainFollowUpConcept({
+          paperId: paper.id,
+          annotationId: selectedAnnotation.id,
+          target: selectedAnnotation.target,
+          annotationPrompt: selectedAnnotation.prompt,
+          annotationExplanation: previousExplanation,
+          followUpPoint: concept,
+        });
 
     const updatedAnnotation: AiAnnotation = {
       ...selectedAnnotation,
@@ -1150,7 +1232,7 @@ async function handleExplainRelatedConcept(concept: string) {
   try {
     setIsAskingQuestion(true);
 
-    const result = await askAiQuestion({
+    const askQuestionParams = {
       paperId: paper.id,
       message: question,
       conversationId: activeConversation?.id ?? null,
@@ -1159,7 +1241,10 @@ async function handleExplainRelatedConcept(concept: string) {
       annotationExplanation: selectedAnnotation
         ? getAnnotationMainExplanation(selectedAnnotation)
         : null,
-    });
+    };
+    const result = isGuestMode
+      ? await askGuestAiQuestion(askQuestionParams)
+      : await askAiQuestion(askQuestionParams);
 
     setActiveConversation(result.conversation);
     setQuestionTurns(result.conversation.turns);
@@ -1369,6 +1454,7 @@ async function handleExplainRelatedConcept(concept: string) {
 
           <Link
             href="/"
+            onClick={handleGuestNavigation}
             className="rounded-md border px-3 py-1.5 text-xs hover:bg-slate-50"
           >
             Upload another PDF

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { loginUser } from "@/lib/api";
+import { endGuestServerSession, startGuestSession } from "@/lib/guestSession";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,12 +20,18 @@ export default function LoginPage() {
 
     try {
       await loginUser({ username, password });
+      await endGuestServerSession();
       router.replace("/");
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to log in");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleContinueAsGuest() {
+    startGuestSession();
+    router.replace("/");
   }
 
   return (
@@ -79,6 +86,20 @@ export default function LoginPage() {
             {isSubmitting ? "Logging in..." : "Log in"}
           </button>
         </form>
+
+        <div className="my-5 flex items-center gap-3 text-xs font-medium uppercase tracking-wide text-slate-400">
+          <div className="h-px flex-1 bg-slate-200" />
+          <span>or</span>
+          <div className="h-px flex-1 bg-slate-200" />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleContinueAsGuest}
+          className="w-full rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+        >
+          Continue as guest
+        </button>
 
         <p className="mt-5 text-center text-sm text-slate-500">
           Need access?{" "}

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.storage.paths import ensure_base_dirs
-from app.routes import papers, annotations, ai, users
+from app.routes import papers, annotations, ai, users, guest
 
 ensure_base_dirs()
 
@@ -20,6 +20,7 @@ app.add_middleware(
 
 app.include_router(users.router)
 app.include_router(users.auth_router)
+app.include_router(guest.router)
 app.include_router(papers.router)
 app.include_router(annotations.router)
 app.include_router(ai.router)

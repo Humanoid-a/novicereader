@@ -9,9 +9,11 @@ from app.models.annotation import (
 )
 from app.models.chat import QuestionAnswerTurn
 from app.models.context import DocumentContext
+from app.models.usage import TokenUsageFeature
 from app.services.context_service import context_to_prompt_text
 from app.services.paper_service import find_paper_or_404
 from app.services.user_service import get_knowledge_profile_summary
+from app.services.usage_service import record_openai_token_usage
 from app.storage.paths import get_user_paper_dir
 
 
@@ -43,6 +45,21 @@ def get_openai_client() -> OpenAI | None:
         return None
 
     return OpenAI(api_key=settings.openai_api_key)
+
+
+def record_response_token_usage(
+    *,
+    context: DocumentContext,
+    feature: TokenUsageFeature,
+    response: object,
+) -> None:
+    record_openai_token_usage(
+        user_id=context.userId,
+        paper_id=context.paperId,
+        feature=feature,
+        model=settings.openai_model,
+        response=response,
+    )
 
 
 def placeholder_explanation(
@@ -342,6 +359,11 @@ def call_openai_for_explanation(
             }
         ],
     )
+    record_response_token_usage(
+        context=context,
+        feature="annotation_explanation",
+        response=response,
+    )
 
     return parse_ai_annotation_output(response.output_text)
 
@@ -473,6 +495,11 @@ def call_openai_for_follow_up_explanation(
                 "content": content,
             }
         ],
+    )
+    record_response_token_usage(
+        context=context,
+        feature="follow_up_explanation",
+        response=response,
     )
 
     return AiExplanationContent(
@@ -639,6 +666,11 @@ def call_openai_for_question(
             }
         ],
     )
+    record_response_token_usage(
+        context=context,
+        feature="ask_question",
+        response=response,
+    )
 
     return response.output_text.strip()
 
@@ -681,6 +713,11 @@ def call_openai_chat(
                 ],
             }
         ],
+    )
+    record_response_token_usage(
+        context=context,
+        feature="document_chat",
+        response=response,
     )
 
     return response.output_text

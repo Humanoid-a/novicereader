@@ -9,6 +9,7 @@ from app.models.user import (
     UserKnowledgeProfile,
     UserProfile,
 )
+from app.models.usage import TokenUsageSummary
 from app.services.auth_dependency import get_current_user
 from app.services.user_service import (
     get_knowledge_profile_summary,
@@ -16,6 +17,7 @@ from app.services.user_service import (
     register_user,
     update_user_knowledge_profile,
 )
+from app.services.usage_service import get_user_token_usage_summary
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -83,3 +85,8 @@ def put_user_knowledge_profile(
 @router.get("/me/knowledge-summary", response_model=KnowledgeProfileSummary)
 def read_user_knowledge_summary(current_user: UserProfile = Depends(get_current_user)):
     return get_knowledge_profile_summary(current_user.id)
+
+
+@router.get("/me/token-usage", response_model=TokenUsageSummary)
+def read_user_token_usage(current_user: UserProfile = Depends(get_current_user)):
+    return get_user_token_usage_summary(current_user.id)

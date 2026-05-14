@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "env:local": "python3 scripts/switch_environment.py local",
+    "env:lan": "python3 scripts/switch_environment.py local --lan-host",
     "env:deploy": "python3 scripts/switch_environment.py deploy",
     "env:init:local": "python3 scripts/install_env_files.py local",
     "env:init:deploy": "python3 scripts/install_env_files.py deploy"

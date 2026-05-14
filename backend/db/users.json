@@ -38,5 +38,45 @@
     },
     "createdAt": "2026-05-14T00:17:06.588133+00:00",
     "updatedAt": "2026-05-14T00:17:06.588133+00:00"
+  },
+  {
+    "id": "guest-dd248743b21047fd973d952e",
+    "username": "guest-dd248743b21047fd973d952e",
+    "displayName": "Guest",
+    "knowledgeProfile": {
+      "educationLevel": "high_school",
+      "assumedFromEmptyOnboarding": true,
+      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
+      "knownCourses": [],
+      "knownConcepts": [],
+      "knownDomains": [],
+      "learningGoals": [],
+      "weakAreas": [],
+      "explanationPreference": "beginner-friendly",
+      "explanationDepth": "gentle"
+    },
+    "createdAt": "2026-05-14T02:53:49.095497+00:00",
+    "updatedAt": "2026-05-14T02:53:49.095497+00:00"
+  },
+  {
+    "id": "testuser",
+    "username": "testuser",
+    "displayName": "Test",
+    "knowledgeProfile": {
+      "educationLevel": "high_school",
+      "assumedFromEmptyOnboarding": true,
+      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
+      "knownCourses": [],
+      "knownConcepts": [],
+      "knownDomains": [],
+      "learningGoals": [],
+      "weakAreas": [],
+      "explanationPreference": "beginner-friendly",
+      "explanationDepth": "gentle"
+    },
+    "createdAt": "2026-05-14T02:54:25.632141+00:00",
+    "updatedAt": "2026-05-14T02:54:25.632141+00:00",
+    "passwordHash": "$argon2id$v=19$m=65536,t=3,p=4$FBsrDdWbBLK3ZrJ5DWoM+Q$kHwY69IZ5oag7JU/dnst99sQ7iz5BohKB1/ZuP7+zaA",
+    "disabled": false
   }
 ]

@@ -25,6 +25,7 @@ BACKEND_ENV_EXAMPLE_PATH = ROOT_DIR / "backend" / ".env.example"
 LOCAL_FRONTEND_ORIGIN = "http://localhost:3000"
 LOCAL_FRONTEND_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 LOCAL_BACKEND_ORIGIN = "http://localhost:8000"
+LOCAL_FRONTEND_ORIGIN_REGEX = r"^https?://[^/]+$"
 PRODUCTION_ORIGIN = "https://novicereader.com"
 PRODUCTION_WWW_ORIGIN = "https://www.novicereader.com"
 
@@ -129,12 +130,43 @@ def update_env(updates: dict[str, str]) -> None:
     BACKEND_ENV_PATH.write_text("\n".join(updated_lines).rstrip() + "\n", encoding="utf-8")
 
 
-def get_env_updates(mode: str, pdf_storage: str) -> dict[str, str]:
+def get_local_origin(host: str, port: int) -> str:
+    if ":" in host and not host.startswith("["):
+        return f"http://[{host}]:{port}"
+
+    return f"http://{host}:{port}"
+
+
+def get_local_frontend_origins(lan_host: str | None) -> str:
+    origins = [
+        LOCAL_FRONTEND_ORIGIN,
+        "http://127.0.0.1:3000",
+    ]
+
+    if lan_host:
+        origins.append(get_local_origin(lan_host, 3000))
+
+    return ",".join(dict.fromkeys(origins))
+
+
+def get_env_updates(
+    mode: str,
+    pdf_storage: str,
+    lan_host: str | None,
+) -> dict[str, str]:
     if mode == "local":
+        frontend_origin = (
+            get_local_origin(lan_host, 3000) if lan_host else LOCAL_FRONTEND_ORIGIN
+        )
+        backend_origin = (
+            get_local_origin(lan_host, 8000) if lan_host else LOCAL_BACKEND_ORIGIN
+        )
+
         return {
-            "FRONTEND_ORIGIN": LOCAL_FRONTEND_ORIGIN,
-            "FRONTEND_ORIGINS": LOCAL_FRONTEND_ORIGINS,
-            "PUBLIC_BACKEND_ORIGIN": LOCAL_BACKEND_ORIGIN,
+            "FRONTEND_ORIGIN": frontend_origin,
+            "FRONTEND_ORIGINS": get_local_frontend_origins(lan_host),
+            "FRONTEND_ORIGIN_REGEX": LOCAL_FRONTEND_ORIGIN_REGEX,
+            "PUBLIC_BACKEND_ORIGIN": backend_origin,
             "DATABASE_URL": "",
             "PDF_STORAGE_BACKEND": "local",
         }
@@ -142,6 +174,7 @@ def get_env_updates(mode: str, pdf_storage: str) -> dict[str, str]:
     return {
         "FRONTEND_ORIGIN": PRODUCTION_ORIGIN,
         "FRONTEND_ORIGINS": f"{PRODUCTION_ORIGIN},{PRODUCTION_WWW_ORIGIN}",
+        "FRONTEND_ORIGIN_REGEX": "",
         "PUBLIC_BACKEND_ORIGIN": PRODUCTION_ORIGIN,
         # Docker Compose injects DATABASE_URL from the root .env POSTGRES_PASSWORD.
         # Keeping this blank here avoids accidentally using a placeholder value.
@@ -150,11 +183,16 @@ def get_env_updates(mode: str, pdf_storage: str) -> dict[str, str]:
     }
 
 
-def print_summary(mode: str, pdf_storage: str) -> None:
+def print_summary(mode: str, pdf_storage: str, lan_host: str | None) -> None:
     if mode == "local":
         print("Switched to local development.")
         print("- deployment.json: isBuiltDeployment=false")
-        print("- backend/.env: localhost origins, local PDF storage, JSON fallback DB")
+        if lan_host:
+            print(f"- backend/.env: localhost and {lan_host} origins")
+            print(f"- other devices can open http://{lan_host}:3000")
+        else:
+            print("- backend/.env: localhost origins")
+        print("- backend/.env: local PDF storage, JSON fallback DB")
         return
 
     print("Switched to deployed server mode.")
@@ -179,12 +217,20 @@ def main() -> None:
         default="local",
         help="PDF storage backend for deployed mode. Default: local.",
     )
+    parser.add_argument(
+        "--lan-host",
+        help=(
+            "Local-network hostname or IP of this development machine, "
+            "for example 192.168.1.20."
+        ),
+    )
     args = parser.parse_args()
     mode = normalize_mode(args.mode)
+    lan_host = args.lan_host.strip() if args.lan_host else None
 
     write_deployment_config(mode)
-    update_env(get_env_updates(mode, args.pdf_storage))
-    print_summary(mode, args.pdf_storage)
+    update_env(get_env_updates(mode, args.pdf_storage, lan_host))
+    print_summary(mode, args.pdf_storage, lan_host)
 
 
 if __name__ == "__main__":

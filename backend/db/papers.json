@@ -8,5 +8,27 @@
     "sizeBytes": 1711928,
     "createdAt": "2026-05-14T00:17:06.800038+00:00",
     "updatedAt": "2026-05-14T00:17:06.800038+00:00"
+  },
+  {
+    "id": "a7ceda05-d9fb-4c96-949d-60015823d5a8",
+    "userId": "guest-dd248743b21047fd973d952e",
+    "originalFilename": "final_version.pdf",
+    "storedFilename": "original.pdf",
+    "storageKey": "novicereader/users/guest-dd248743b21047fd973d952e/papers/a7ceda05-d9fb-4c96-949d-60015823d5a8/original.pdf",
+    "contentType": "application/pdf",
+    "sizeBytes": 1711928,
+    "createdAt": "2026-05-14T02:53:49.193430+00:00",
+    "updatedAt": "2026-05-14T02:53:49.193430+00:00"
+  },
+  {
+    "id": "9c93152e-5202-4fb2-a5b0-023f59206b05",
+    "userId": "testuser",
+    "originalFilename": "final_version.pdf",
+    "storedFilename": "original.pdf",
+    "storageKey": "novicereader/users/testuser/papers/9c93152e-5202-4fb2-a5b0-023f59206b05/original.pdf",
+    "contentType": "application/pdf",
+    "sizeBytes": 1711928,
+    "createdAt": "2026-05-14T02:54:30.624842+00:00",
+    "updatedAt": "2026-05-14T02:54:30.624842+00:00"
   }
 ]

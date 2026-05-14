@@ -58,6 +58,16 @@ def get_default_frontend_origin_regex() -> str | None:
     return r"^https?://[^/]+$"
 
 
+def get_configured_frontend_origin_regex() -> str | None:
+    configured_regex = os.getenv("FRONTEND_ORIGIN_REGEX")
+
+    if configured_regex is not None:
+        stripped_regex = configured_regex.strip()
+        return stripped_regex or None
+
+    return get_default_frontend_origin_regex()
+
+
 class Settings(BaseModel):
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
@@ -83,10 +93,7 @@ class Settings(BaseModel):
     frontend_origins: list[str] = Field(
         default_factory=get_configured_frontend_origins
     )
-    frontend_origin_regex: str | None = os.getenv(
-        "FRONTEND_ORIGIN_REGEX",
-        get_default_frontend_origin_regex(),
-    )
+    frontend_origin_regex: str | None = get_configured_frontend_origin_regex()
 
 
 settings = Settings()

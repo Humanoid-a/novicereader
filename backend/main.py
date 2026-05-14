@@ -2,10 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.storage.data_store import ensure_database_schema
 from app.storage.paths import ensure_base_dirs
 from app.routes import papers, annotations, ai, users, guest
 
 ensure_base_dirs()
+ensure_database_schema()
 
 app = FastAPI(title="NoviceReader Backend")
 

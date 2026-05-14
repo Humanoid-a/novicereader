@@ -7,8 +7,10 @@ from app.models.chat import (
     QuestionConversation,
     QuestionLinkedSelection,
 )
-from app.storage.json_store import read_json, write_json
-from app.storage.paths import get_chat_thread_path
+from app.storage.data_store import (
+    read_question_conversation_records,
+    write_question_conversation_records,
+)
 
 
 def now_iso() -> str:
@@ -19,11 +21,10 @@ def get_or_create_question_conversation(
     user_id: str,
     paper_id: str,
 ) -> QuestionConversation:
-    path = get_chat_thread_path(user_id, paper_id)
-    stored_chat = read_json(path, None)
+    conversations = read_question_conversations(user_id, paper_id)
 
-    if isinstance(stored_chat, dict) and "turns" in stored_chat:
-        return QuestionConversation(**stored_chat)
+    if conversations:
+        return conversations[0]
 
     timestamp = now_iso()
 
@@ -35,7 +36,7 @@ def get_or_create_question_conversation(
         updatedAt=timestamp,
     )
 
-    write_json(path, conversation.model_dump())
+    write_question_conversations(user_id, paper_id, [conversation])
 
     return conversation
 
@@ -44,19 +45,10 @@ def read_question_conversations(
     user_id: str,
     paper_id: str,
 ) -> list[QuestionConversation]:
-    path = get_chat_thread_path(user_id, paper_id)
-    stored_chat = read_json(path, None)
-
-    if isinstance(stored_chat, dict) and "conversations" in stored_chat:
-        return [
-            QuestionConversation(**conversation)
-            for conversation in stored_chat.get("conversations", [])
-        ]
-
-    if isinstance(stored_chat, dict) and "turns" in stored_chat:
-        return [QuestionConversation(**stored_chat)]
-
-    return []
+    return [
+        QuestionConversation(**conversation)
+        for conversation in read_question_conversation_records(user_id, paper_id)
+    ]
 
 
 def write_question_conversations(
@@ -64,13 +56,10 @@ def write_question_conversations(
     paper_id: str,
     conversations: list[QuestionConversation],
 ) -> None:
-    write_json(
-        get_chat_thread_path(user_id, paper_id),
-        {
-            "conversations": [
-                conversation.model_dump() for conversation in conversations
-            ]
-        },
+    write_question_conversation_records(
+        user_id,
+        paper_id,
+        [conversation.model_dump() for conversation in conversations],
     )
 
 

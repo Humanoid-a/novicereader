@@ -20,6 +20,12 @@ import {
   listGuestPapers,
   uploadGuestPaper,
 } from "@/lib/guestSession";
+import {
+  deleteLocalPaper,
+  isLocalPaperId,
+  listLocalPapers,
+  uploadLocalPaper,
+} from "@/lib/localLibrary";
 import type { PaperWithUrls } from "@/types/paper";
 import type { UserProfile } from "@/types/user";
 
@@ -62,6 +68,16 @@ function cleanPaperName(filename: string) {
 
 function isPdfFile(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+}
+
+function isStorageLimitUploadError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+
+  return message.includes("storage limit") || message.includes("space needs to be cleared");
 }
 
 function getDraggedDocument(event: DragEvent<HTMLElement>): DraggedDocument | null {
@@ -142,6 +158,8 @@ export default function HomePage() {
     useState<DeleteConfirmation>(null);
   const [pendingGuestUploadFile, setPendingGuestUploadFile] =
     useState<File | null>(null);
+  const [pendingLocalUploadFile, setPendingLocalUploadFile] =
+    useState<File | null>(null);
   const [draggedDocument, setDraggedDocument] =
     useState<DraggedDocument | null>(null);
   const [error, setError] = useState("");
@@ -186,10 +204,12 @@ export default function HomePage() {
           return;
         }
 
-        const [loadedUser, loadedPapers] = await Promise.all([
+        const [loadedUser, loadedCloudPapers] = await Promise.all([
           getCurrentUser(),
           listPapers(),
         ]);
+        const loadedLocalPapers = await listLocalPapers(loadedUser.id);
+        const loadedPapers = [...loadedCloudPapers, ...loadedLocalPapers];
 
         if (isMounted) {
           setCurrentUser(loadedUser);
@@ -254,6 +274,12 @@ export default function HomePage() {
       router.push(`/reader/${paper.id}`);
     } catch (error) {
       console.error(error);
+
+      if (!isGuestMode && isStorageLimitUploadError(error)) {
+        setPendingLocalUploadFile(file);
+        return;
+      }
+
       setError(
         error instanceof Error
           ? error.message
@@ -267,6 +293,46 @@ export default function HomePage() {
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+    }
+  }
+
+  async function handleLocalFallbackUpload() {
+    if (!pendingLocalUploadFile) {
+      return;
+    }
+
+    const file = pendingLocalUploadFile;
+    setPendingLocalUploadFile(null);
+    setIsUploading(true);
+    setError("");
+
+    try {
+      const paper = await uploadLocalPaper(
+        file,
+        currentUser?.id || "local-user",
+      );
+      router.push(`/reader/${paper.id}`);
+    } catch (error) {
+      console.error(error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to keep this PDF on this computer.",
+      );
+    } finally {
+      setIsUploading(false);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  function cancelLocalFallbackUpload() {
+    setPendingLocalUploadFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   }
 
@@ -387,6 +453,8 @@ export default function HomePage() {
     try {
       if (isGuestMode) {
         await deleteGuestPaper(paper.id);
+      } else if (isLocalPaperId(paper.id)) {
+        await deleteLocalPaper(paper.id);
       } else {
         await deletePaper(paper.id);
       }
@@ -441,6 +509,8 @@ export default function HomePage() {
       for (const paperId of selectedIds) {
         if (isGuestMode) {
           await deleteGuestPaper(paperId);
+        } else if (isLocalPaperId(paperId)) {
+          await deleteLocalPaper(paperId);
         } else {
           await deletePaper(paperId);
         }
@@ -602,14 +672,6 @@ export default function HomePage() {
         {error && (
           <div className="mb-5 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
-          </div>
-        )}
-
-        {isGuestMode && (
-          <div className="mb-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-            Uploading as guest uses the cloud reader workflow for AI features
-            and also keeps a local backup in this browser. Guest data is not
-            attached to a registered account.
           </div>
         )}
 
@@ -851,6 +913,51 @@ export default function HomePage() {
                 className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
               >
                 Upload as guest
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingLocalUploadFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <button
+            type="button"
+            aria-label="Go back"
+            className="absolute inset-0 bg-slate-950/30"
+            onClick={cancelLocalFallbackUpload}
+          />
+
+          <div className="relative w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700">
+                <DocumentIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">
+                  Cloud storage is full
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  This PDF can be kept on this computer only. Delete files to
+                  save future uploads to cloud.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelLocalFallbackUpload}
+                className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+              >
+                Go back
+              </button>
+              <button
+                type="button"
+                onClick={handleLocalFallbackUpload}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
+              >
+                Continue
               </button>
             </div>
           </div>

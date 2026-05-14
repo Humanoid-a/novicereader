@@ -1,18 +1,22 @@
 from fastapi import UploadFile, HTTPException
 from datetime import datetime, timezone
-import shutil
+from pathlib import Path
+import tempfile
 import uuid
 
 from app.config import settings
 from app.models.paper import PaperWithUrls
-from app.storage.paths import (
-    PAPERS_DB_PATH,
-    get_user_paper_dir,
-    get_annotations_path,
-    get_chat_thread_path,
-    get_document_context_path,
+from app.storage.data_store import (
+    delete_paper_record,
+    get_paper_record,
+    get_user_paper_size_bytes,
+    list_paper_records,
+    save_paper_record,
+    write_annotation_records,
+    write_document_context,
+    write_question_conversation_records,
 )
-from app.storage.json_store import read_json, write_json
+from app.storage.pdf_storage import delete_pdf_for_paper, save_pdf_from_path
 from app.services.user_service import ensure_user_profile
 
 USER_STORAGE_LIMIT_BYTES = 200 * 1024 * 1024
@@ -33,30 +37,17 @@ def paper_with_urls(paper: dict) -> dict:
     }
 
 
-def read_papers() -> list[dict]:
-    return read_json(PAPERS_DB_PATH, [])
-
-
-def write_papers(papers: list[dict]) -> None:
-    write_json(PAPERS_DB_PATH, papers)
-
-
 def find_paper_or_404(user_id: str, paper_id: str) -> dict:
-    papers = read_papers()
+    paper = get_paper_record(user_id, paper_id)
 
-    for paper in papers:
-        if paper["id"] == paper_id and paper["userId"] == user_id:
-            return paper
+    if paper is not None:
+        return paper
 
     raise HTTPException(status_code=404, detail="Paper not found")
 
 
 def get_user_stored_size_bytes(user_id: str) -> int:
-    return sum(
-        int(paper.get("sizeBytes", 0))
-        for paper in read_papers()
-        if paper.get("userId") == user_id
-    )
+    return get_user_paper_size_bytes(user_id)
 
 
 def raise_user_storage_limit_error() -> None:
@@ -82,50 +73,56 @@ async def upload_paper_for_user(user_id: str, file: UploadFile) -> PaperWithUrls
     paper_id = str(uuid.uuid4())
     stored_filename = "original.pdf"
 
-    paper_dir = get_user_paper_dir(user_id, paper_id)
-    paper_dir.mkdir(parents=True, exist_ok=True)
-
-    stored_file_path = paper_dir / stored_filename
-
     size_bytes = 0
+    temp_path: Path | None = None
 
-    with stored_file_path.open("wb") as buffer:
-        while True:
-            chunk = await file.read(1024 * 1024)
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as buffer:
+            temp_path = Path(buffer.name)
 
-            if not chunk:
-                break
+            while True:
+                chunk = await file.read(1024 * 1024)
 
-            size_bytes += len(chunk)
-            if current_stored_size_bytes + size_bytes > USER_STORAGE_LIMIT_BYTES:
-                buffer.close()
-                stored_file_path.unlink(missing_ok=True)
-                paper_dir.rmdir()
-                raise_user_storage_limit_error()
+                if not chunk:
+                    break
 
-            buffer.write(chunk)
+                size_bytes += len(chunk)
+                if current_stored_size_bytes + size_bytes > USER_STORAGE_LIMIT_BYTES:
+                    raise_user_storage_limit_error()
 
-    timestamp = now_iso()
+                buffer.write(chunk)
+
+        timestamp = now_iso()
+        storage_key = save_pdf_from_path(
+            user_id=user_id,
+            paper_id=paper_id,
+            stored_filename=stored_filename,
+            content_type=file.content_type,
+            source_path=temp_path,
+        )
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
     paper = {
         "id": paper_id,
         "userId": user_id,
         "originalFilename": file.filename or "uploaded.pdf",
         "storedFilename": stored_filename,
+        "storageKey": storage_key,
         "contentType": file.content_type,
         "sizeBytes": size_bytes,
         "createdAt": timestamp,
         "updatedAt": timestamp,
     }
 
-    papers = read_papers()
-    papers.append(paper)
-    write_papers(papers)
+    save_paper_record(paper)
 
-    write_json(get_annotations_path(user_id, paper_id), [])
-    write_json(get_chat_thread_path(user_id, paper_id), [])
-    write_json(
-        get_document_context_path(user_id, paper_id),
+    write_annotation_records(user_id, paper_id, [])
+    write_question_conversation_records(user_id, paper_id, [])
+    write_document_context(
+        user_id,
+        paper_id,
         {
             "paperId": paper_id,
             "userId": user_id,
@@ -148,8 +145,7 @@ async def upload_paper_for_user(user_id: str, file: UploadFile) -> PaperWithUrls
 def list_user_papers(user_id: str) -> list[PaperWithUrls]:
     return [
         PaperWithUrls(**paper_with_urls(paper))
-        for paper in read_papers()
-        if paper["userId"] == user_id
+        for paper in list_paper_records(user_id)
     ]
 
 
@@ -159,18 +155,9 @@ def get_user_paper(user_id: str, paper_id: str) -> PaperWithUrls:
 
 
 def delete_user_paper(user_id: str, paper_id: str) -> dict:
-    find_paper_or_404(user_id, paper_id)
-
-    papers = read_papers()
-    write_papers(
-        [
-            paper
-            for paper in papers
-            if not (paper["id"] == paper_id and paper["userId"] == user_id)
-        ]
-    )
-
-    shutil.rmtree(get_user_paper_dir(user_id, paper_id), ignore_errors=True)
+    paper = find_paper_or_404(user_id, paper_id)
+    delete_pdf_for_paper(paper)
+    delete_paper_record(user_id, paper_id)
 
     return {
         "success": True,

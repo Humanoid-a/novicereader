@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, UploadFile, File
 
 from app.models.paper import PaperWithUrls
 from app.models.user import UserProfile
@@ -11,7 +10,7 @@ from app.services.paper_service import (
     find_paper_or_404,
     delete_user_paper,
 )
-from app.storage.paths import get_user_paper_dir
+from app.storage.pdf_storage import get_pdf_response
 
 router = APIRouter(prefix="/api/papers", tags=["papers"])
 
@@ -60,13 +59,4 @@ def get_paper_file(
 ):
     paper = find_paper_or_404(current_user.id, paper_id)
 
-    file_path = get_user_paper_dir(current_user.id, paper_id) / paper["storedFilename"]
-
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="PDF file not found")
-
-    return FileResponse(
-        path=file_path,
-        media_type="application/pdf",
-        filename=paper["originalFilename"],
-    )
+    return get_pdf_response(paper)

@@ -14,7 +14,7 @@ from app.services.context_service import context_to_prompt_text
 from app.services.paper_service import find_paper_or_404
 from app.services.user_service import get_knowledge_profile_summary
 from app.services.usage_service import record_openai_token_usage
-from app.storage.paths import get_user_paper_dir
+from app.storage.pdf_storage import read_pdf_bytes
 
 
 FOLLOW_UP_EXPLANATION_TAG = "novicereader_followupexplanationtag"
@@ -26,12 +26,12 @@ FOLLOW_UP_EXPLANATION_PATTERN = re.compile(
 
 def build_pdf_input_file(context: DocumentContext) -> dict | None:
     paper = find_paper_or_404(context.userId, context.paperId)
-    pdf_path = get_user_paper_dir(context.userId, context.paperId) / paper["storedFilename"]
+    pdf_bytes = read_pdf_bytes(paper)
 
-    if not pdf_path.exists():
+    if pdf_bytes is None:
         return None
 
-    encoded_pdf = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
+    encoded_pdf = base64.b64encode(pdf_bytes).decode("ascii")
 
     return {
         "type": "input_file",

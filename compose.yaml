@@ -33,16 +33,36 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file:
       - backend/.env
     environment:
       PYTHONUNBUFFERED: "1"
+      DATABASE_URL: "postgresql+psycopg://novicereader:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a root .env file before running docker compose}@postgres:5432/novicereader"
     expose:
       - "8000"
     volumes:
       - ./backend/storage:/app/backend/storage
       - ./backend/db:/app/backend/db
 
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: novicereader
+      POSTGRES_USER: novicereader
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in a root .env file before running docker compose}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novicereader -d novicereader"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
 volumes:
   caddy_data:
   caddy_config:
+  postgres_data:

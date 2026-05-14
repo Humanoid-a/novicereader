@@ -36,6 +36,17 @@ import {
   listGuestAnnotations,
   listGuestConversations,
 } from "@/lib/guestSession";
+import {
+  askLocalAiQuestion,
+  createLocalPaperAnnotation,
+  deleteLocalAnnotationTarget,
+  explainLocalFollowUpConcept,
+  explainLocalSelection,
+  getLocalPaper,
+  isLocalPaperId,
+  listLocalAnnotations,
+  listLocalConversations,
+} from "@/lib/localLibrary";
 import type { PaperWithUrls } from "@/types/paper";
 import type {
   AiAnnotation,
@@ -280,6 +291,7 @@ export default function ReaderPage() {
 
   const [paper, setPaper] = useState<PaperWithUrls | null>(null);
   const [isGuestMode, setIsGuestMode] = useState(false);
+  const [isLocalPaper, setIsLocalPaper] = useState(false);
   const [annotations, setAnnotations] = useState<AiAnnotation[]>([]);
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1);
   const [pdfNumPages, setPdfNumPages] = useState(0);
@@ -385,6 +397,20 @@ useEffect(() => {
         const loadedConversations = await listGuestConversations(paperId);
 
         setIsGuestMode(true);
+        setIsLocalPaper(false);
+        setPaper(loadedPaper);
+        setAnnotations(loadedAnnotations);
+        setAllConversations(loadedConversations);
+        return;
+      }
+
+      if (isLocalPaperId(paperId)) {
+        const loadedPaper = await getLocalPaper(paperId);
+        const loadedAnnotations = await listLocalAnnotations(paperId);
+        const loadedConversations = await listLocalConversations(paperId);
+
+        setIsGuestMode(false);
+        setIsLocalPaper(true);
         setPaper(loadedPaper);
         setAnnotations(loadedAnnotations);
         setAllConversations(loadedConversations);
@@ -392,6 +418,7 @@ useEffect(() => {
       }
 
       setIsGuestMode(false);
+      setIsLocalPaper(false);
       const loadedPaper = await getPaper(paperId);
       const loadedAnnotations = await listPaperAnnotations(paperId);
       const loadedConversations = await listPaperConversations(paperId);
@@ -411,7 +438,7 @@ useEffect(() => {
 }, [paperId, router]);
 
 useEffect(() => {
-  if (!isGuestMode || !paper) {
+  if ((!isGuestMode && !isLocalPaper) || !paper) {
     return;
   }
 
@@ -425,7 +452,7 @@ useEffect(() => {
   return () => {
     window.removeEventListener("beforeunload", warnBeforeLeaving);
   };
-}, [isGuestMode, paper]);
+}, [isGuestMode, isLocalPaper, paper]);
 
 useEffect(() => {
   const scrollContainer = pdfScrollContainerRef.current;
@@ -906,6 +933,11 @@ async function confirmDeleteAnnotation() {
         paperId: paper.id,
         targetId: deletedTargetId,
       });
+    } else if (isLocalPaper) {
+      await deleteLocalAnnotationTarget({
+        paperId: paper.id,
+        targetId: deletedTargetId,
+      });
     } else {
       await deletePaperAnnotationTarget({
         paperId: paper.id,
@@ -1090,11 +1122,16 @@ async function handleExplainSelection() {
           target: currentSelection,
           prompt: explanationPrompt,
         })
-      : await explainSelection({
-          paperId: paper.id,
-          target: currentSelection,
-          prompt: explanationPrompt,
-        });
+      : isLocalPaper
+        ? await explainLocalSelection({
+            target: currentSelection,
+            prompt: explanationPrompt,
+          })
+        : await explainSelection({
+            paperId: paper.id,
+            target: currentSelection,
+            prompt: explanationPrompt,
+          });
 
 setAiResponse(result.explanation.mainExplanation);
 
@@ -1114,7 +1151,9 @@ setAiResponse(result.explanation.mainExplanation);
 
       const savedAnnotation = isGuestMode
         ? await createGuestPaperAnnotation(paper.id, annotation)
-        : await createPaperAnnotation(paper.id, annotation);
+        : isLocalPaper
+          ? await createLocalPaperAnnotation(paper.id, annotation)
+          : await createPaperAnnotation(paper.id, annotation);
 
 setAnnotations((current) => [savedAnnotation, ...current]);
 setSelectedAnnotation(savedAnnotation);
@@ -1170,14 +1209,20 @@ async function handleExplainRelatedConcept(concept: string) {
           annotationExplanation: previousExplanation,
           followUpPoint: concept,
         })
-      : await explainFollowUpConcept({
-          paperId: paper.id,
-          annotationId: selectedAnnotation.id,
-          target: selectedAnnotation.target,
-          annotationPrompt: selectedAnnotation.prompt,
-          annotationExplanation: previousExplanation,
-          followUpPoint: concept,
-        });
+      : isLocalPaper
+        ? await explainLocalFollowUpConcept({
+            paperId: paper.id,
+            annotationId: selectedAnnotation.id,
+            followUpPoint: concept,
+          })
+        : await explainFollowUpConcept({
+            paperId: paper.id,
+            annotationId: selectedAnnotation.id,
+            target: selectedAnnotation.target,
+            annotationPrompt: selectedAnnotation.prompt,
+            annotationExplanation: previousExplanation,
+            followUpPoint: concept,
+          });
 
     const updatedAnnotation: AiAnnotation = {
       ...selectedAnnotation,
@@ -1244,7 +1289,9 @@ async function handleExplainRelatedConcept(concept: string) {
     };
     const result = isGuestMode
       ? await askGuestAiQuestion(askQuestionParams)
-      : await askAiQuestion(askQuestionParams);
+      : isLocalPaper
+        ? await askLocalAiQuestion(askQuestionParams)
+        : await askAiQuestion(askQuestionParams);
 
     setActiveConversation(result.conversation);
     setQuestionTurns(result.conversation.turns);

@@ -61,6 +61,14 @@ def get_default_frontend_origin_regex() -> str | None:
 class Settings(BaseModel):
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
+    database_url: str | None = os.getenv("DATABASE_URL")
+    pdf_storage_backend: str = os.getenv("PDF_STORAGE_BACKEND", "local")
+    s3_bucket: str | None = os.getenv("S3_BUCKET")
+    s3_region: str | None = os.getenv("S3_REGION")
+    s3_endpoint_url: str | None = os.getenv("S3_ENDPOINT_URL")
+    s3_access_key_id: str | None = os.getenv("S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str | None = os.getenv("S3_SECRET_ACCESS_KEY")
+    s3_prefix: str = os.getenv("S3_PREFIX", "novicereader")
     auth_secret_key: str | None = os.getenv("AUTH_SECRET_KEY")
     auth_algorithm: str = os.getenv("AUTH_ALGORITHM", "HS256")
     access_token_expire_minutes: int = int(

@@ -86,6 +86,14 @@ function setStoredGuestServerSession(session: GuestServerSession) {
   );
 }
 
+function clearStoredGuestServerSession() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(GUEST_SERVER_SESSION_STORAGE_KEY);
+}
+
 function getGuestSessionHeaders(session: GuestServerSession) {
   return {
     "X-Guest-Session-Id": session.sessionId,
@@ -136,6 +144,17 @@ async function ensureGuestServerSession(): Promise<GuestServerSession> {
   setStoredGuestServerSession(session);
 
   return session;
+}
+
+async function uploadGuestPaperToServer(file: File, session: GuestServerSession) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return fetch(`${getApiBaseUrl()}/api/guest/papers`, {
+    method: "POST",
+    headers: getGuestSessionHeaders(session),
+    body: formData,
+  });
 }
 
 function openGuestDb(): Promise<IDBDatabase> {
@@ -272,15 +291,24 @@ export async function uploadGuestPaper(file: File): Promise<PaperWithUrls> {
     throw new Error("Only PDF files are allowed.");
   }
 
-  const session = await ensureGuestServerSession();
-  const formData = new FormData();
-  formData.append("file", file);
+  let session = await ensureGuestServerSession();
+  let response = await uploadGuestPaperToServer(file, session);
 
-  const response = await fetch(`${getApiBaseUrl()}/api/guest/papers`, {
-    method: "POST",
-    headers: getGuestSessionHeaders(session),
-    body: formData,
-  });
+  if (!response.ok) {
+    const firstErrorMessage = await getGuestErrorMessage(
+      response,
+      "Failed to upload guest PDF.",
+    );
+
+    if (
+      response.status === 404 &&
+      firstErrorMessage.toLowerCase().includes("guest session not found")
+    ) {
+      clearStoredGuestServerSession();
+      session = await ensureGuestServerSession();
+      response = await uploadGuestPaperToServer(file, session);
+    }
+  }
 
   if (!response.ok) {
     throw new Error(

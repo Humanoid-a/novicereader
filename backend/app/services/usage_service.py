@@ -7,8 +7,7 @@ from app.models.usage import (
     TokenUsageRecord,
     TokenUsageSummary,
 )
-from app.storage.json_store import read_json, write_json
-from app.storage.paths import get_user_token_usage_path
+from app.storage.data_store import read_token_usage_records, save_token_usage_record
 
 
 def now_iso() -> str:
@@ -57,19 +56,12 @@ def _usage_to_dict(usage: object | None) -> dict:
 
 
 def _read_usage_records(user_id: str) -> list[TokenUsageRecord]:
-    records = read_json(get_user_token_usage_path(user_id), [])
+    records = read_token_usage_records(user_id)
 
     if not isinstance(records, list):
         return []
 
     return [TokenUsageRecord(**record) for record in records]
-
-
-def _write_usage_records(user_id: str, records: list[TokenUsageRecord]) -> None:
-    write_json(
-        get_user_token_usage_path(user_id),
-        [record.model_dump() for record in records],
-    )
 
 
 def _record_to_bucket(bucket_name: str, record: TokenUsageRecord) -> TokenUsageBucket:
@@ -146,9 +138,7 @@ def record_openai_token_usage(
         rawUsage=raw_usage,
         createdAt=now_iso(),
     )
-    records = _read_usage_records(user_id)
-    records.append(record)
-    _write_usage_records(user_id, records)
+    save_token_usage_record(record.model_dump())
 
     return record
 

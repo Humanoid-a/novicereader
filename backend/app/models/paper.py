@@ -6,6 +6,7 @@ class PaperRecord(BaseModel):
     userId: str
     originalFilename: str
     storedFilename: str
+    storageKey: str | None = None
     contentType: str
     sizeBytes: int
     createdAt: str

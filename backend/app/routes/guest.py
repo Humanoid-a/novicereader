@@ -1,6 +1,4 @@
 from fastapi import APIRouter, File, Header, Query, UploadFile
-from fastapi.responses import FileResponse
-
 from app.models.ai import (
     AiChatRequest,
     AiChatResponse,
@@ -34,7 +32,7 @@ from app.services.guest_service import (
     delete_guest_paper,
     end_guest_session,
     get_guest_paper,
-    get_guest_paper_file_path,
+    get_guest_paper_file_response,
     get_guest_user_id,
     list_guest_papers,
     upload_guest_paper,
@@ -143,16 +141,10 @@ def read_guest_reader_paper_file(
     session_id: str = Query(...),
     session_token: str = Query(...),
 ):
-    paper, file_path = get_guest_paper_file_path(
+    return get_guest_paper_file_response(
         session_id=session_id,
         session_token=session_token,
         paper_id=paper_id,
-    )
-
-    return FileResponse(
-        path=file_path,
-        media_type="application/pdf",
-        filename=paper["originalFilename"],
     )
 
 

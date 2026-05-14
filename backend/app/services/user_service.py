@@ -17,8 +17,7 @@ from app.models.user import (
     UserKnowledgeProfile,
     UserProfile,
 )
-from app.storage.json_store import read_json, write_json
-from app.storage.paths import USERS_DB_PATH
+from app.storage.data_store import get_user_record, save_user_record
 
 
 TEST_USER_ID = "test-user-001"
@@ -29,14 +28,6 @@ DUMMY_PASSWORD_HASH = password_hash.hash("novicereader-dummy-password")
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def read_users() -> list[dict]:
-    return read_json(USERS_DB_PATH, [])
-
-
-def write_users(users: list[dict]) -> None:
-    write_json(USERS_DB_PATH, users)
 
 
 def default_knowledge_profile() -> UserKnowledgeProfile:
@@ -86,7 +77,7 @@ def stored_user_from_dict(user: dict) -> StoredUserProfile:
     data.setdefault("displayName", "NoviceReader User")
     data.setdefault("disabled", False)
 
-    if "passwordHash" not in data:
+    if not data.get("passwordHash"):
         raise HTTPException(status_code=401, detail="User must register again")
 
     return StoredUserProfile(**data)
@@ -107,12 +98,11 @@ def default_user_profile(user_id: str, display_name: str | None = None) -> UserP
 
 
 def ensure_user_profile(user_id: str, display_name: str | None = None) -> UserProfile:
-    users = read_users()
     normalized_user_id = normalize_username(user_id)
+    user = get_user_record(normalized_user_id)
 
-    for user in users:
-        if user["id"] == normalized_user_id:
-            return public_user(user)
+    if user is not None:
+        return public_user(user)
 
     raise HTTPException(status_code=404, detail="User not found")
 
@@ -122,12 +112,11 @@ def get_user_profile(user_id: str) -> UserProfile:
 
 
 def get_stored_user(user_id: str) -> StoredUserProfile:
-    users = read_users()
     normalized_user_id = normalize_username(user_id)
+    user = get_user_record(normalized_user_id)
 
-    for user in users:
-        if user["id"] == normalized_user_id:
-            return stored_user_from_dict(user)
+    if user is not None:
+        return stored_user_from_dict(user)
 
     raise HTTPException(status_code=404, detail="User not found")
 
@@ -137,11 +126,9 @@ def create_user_profile(
     display_name: str | None = None,
     knowledge_profile: UserKnowledgeProfile | None = None,
 ) -> UserProfile:
-    users = read_users()
-
     normalized_user_id = normalize_username(user_id)
 
-    if any(user["id"] == normalized_user_id for user in users):
+    if get_user_record(normalized_user_id) is not None:
         raise HTTPException(status_code=409, detail="User already exists")
 
     user = default_user_profile(normalized_user_id, display_name)
@@ -150,8 +137,7 @@ def create_user_profile(
         user.knowledgeProfile = knowledge_profile
         user.updatedAt = now_iso()
 
-    users.append(user.model_dump())
-    write_users(users)
+    save_user_record(user.model_dump())
 
     return user
 
@@ -169,19 +155,14 @@ def register_user(request: RegisterUserRequest) -> AuthToken:
     username = normalize_username(request.username)
     validate_password(request.password)
 
-    users = read_users()
+    existing_user = get_user_record(username)
 
-    existing_user_index = next(
-        (index for index, user in enumerate(users) if user.get("id") == username),
-        None,
-    )
-
-    if existing_user_index is not None and users[existing_user_index].get("passwordHash"):
+    if existing_user is not None and existing_user.get("passwordHash"):
         raise HTTPException(status_code=409, detail="Username is already taken")
 
     timestamp = now_iso()
 
-    if existing_user_index is None:
+    if existing_user is None:
         user = StoredUserProfile(
             id=username,
             username=username,
@@ -191,9 +172,8 @@ def register_user(request: RegisterUserRequest) -> AuthToken:
             createdAt=timestamp,
             updatedAt=timestamp,
         )
-        users.append(user.model_dump())
+        stored_user_data = user.model_dump()
     else:
-        existing_user = users[existing_user_index]
         existing_user["username"] = username
         existing_user["displayName"] = request.displayName or existing_user.get("displayName") or username
         existing_user["passwordHash"] = password_hash.hash(request.password)
@@ -202,11 +182,10 @@ def register_user(request: RegisterUserRequest) -> AuthToken:
 
         if request.knowledgeProfile is not None:
             existing_user["knowledgeProfile"] = request.knowledgeProfile.model_dump()
-
-        users[existing_user_index] = existing_user
         user = stored_user_from_dict(existing_user)
+        stored_user_data = existing_user
 
-    write_users(users)
+    save_user_record(stored_user_data)
 
     return AuthToken(
         accessToken=create_access_token(user.id),
@@ -216,13 +195,10 @@ def register_user(request: RegisterUserRequest) -> AuthToken:
 
 def authenticate_user(username: str, password: str) -> StoredUserProfile | None:
     normalized_username = normalize_username(username)
-    users = read_users()
-    stored_user: StoredUserProfile | None = None
-
-    for user in users:
-        if user.get("id") == normalized_username:
-            stored_user = stored_user_from_dict(user)
-            break
+    user = get_user_record(normalized_username)
+    stored_user: StoredUserProfile | None = (
+        stored_user_from_dict(user) if user is not None else None
+    )
 
     if stored_user is None:
         password_hash.verify(password, DUMMY_PASSWORD_HASH)
@@ -309,20 +285,16 @@ def update_user_knowledge_profile(
     user_id: str,
     knowledge_profile: UserKnowledgeProfile,
 ) -> UserProfile:
-    users = read_users()
+    user = get_user_record(user_id)
 
-    for index, user in enumerate(users):
-        if user["id"] != user_id:
-            continue
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
 
-        user["knowledgeProfile"] = knowledge_profile.model_dump()
-        user["updatedAt"] = now_iso()
-        users[index] = user
-        write_users(users)
+    user["knowledgeProfile"] = knowledge_profile.model_dump()
+    user["updatedAt"] = now_iso()
+    save_user_record(user)
 
-        return public_user(user)
-
-    raise HTTPException(status_code=404, detail="User not found")
+    return public_user(user)
 
 
 def summarize_knowledge_profile(user: UserProfile) -> KnowledgeProfileSummary:

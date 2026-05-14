@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from pathlib import Path
 from urllib.parse import quote
 import secrets
 import uuid
@@ -16,11 +15,10 @@ from app.services.paper_service import (
     upload_paper_for_user,
 )
 from app.services.user_service import create_user_profile, ensure_user_profile
-from app.storage.json_store import read_json, write_json
+from app.storage.data_store import read_guest_session_records, write_guest_session_records
+from app.storage.pdf_storage import get_pdf_response
 from app.storage.paths import (
-    GUEST_SESSIONS_DB_PATH,
     get_guest_session_dir,
-    get_user_paper_dir,
 )
 
 
@@ -29,7 +27,7 @@ def now_iso() -> str:
 
 
 def read_guest_sessions() -> list[GuestSession]:
-    sessions = read_json(GUEST_SESSIONS_DB_PATH, [])
+    sessions = read_guest_session_records()
 
     if not isinstance(sessions, list):
         return []
@@ -38,8 +36,7 @@ def read_guest_sessions() -> list[GuestSession]:
 
 
 def write_guest_sessions(sessions: list[GuestSession]) -> None:
-    write_json(
-        GUEST_SESSIONS_DB_PATH,
+    write_guest_session_records(
         [session.model_dump() for session in sessions],
     )
 
@@ -190,22 +187,18 @@ def get_guest_paper(
     return guest_paper_with_urls(paper, session_id, session_token)
 
 
-def get_guest_paper_file_path(
+def get_guest_paper_file_response(
     *,
     session_id: str,
     session_token: str,
     paper_id: str,
-) -> tuple[dict, Path]:
+) -> object:
     session = get_guest_session(session_id, session_token)
     guest_user_id = ensure_guest_user(session)
     paper = get_user_paper(guest_user_id, paper_id)
     paper_data = paper.model_dump()
-    file_path = get_user_paper_dir(guest_user_id, paper_id) / paper.storedFilename
 
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Guest PDF file not found")
-
-    return paper_data, file_path
+    return get_pdf_response(paper_data)
 
 
 def delete_guest_paper(

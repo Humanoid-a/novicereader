@@ -3,8 +3,11 @@ from datetime import datetime, timezone
 import uuid
 
 from app.models.annotation import AiAnnotation, FollowUpExplanationItem
-from app.storage.paths import get_annotations_path
-from app.storage.json_store import read_json, write_json
+from app.storage.data_store import (
+    read_annotation_records,
+    save_annotation_record,
+    write_annotation_records,
+)
 from app.services.paper_service import find_paper_or_404
 from app.services.question_service import has_questions_linked_to_target
 
@@ -16,10 +19,9 @@ def now_iso() -> str:
 def list_annotations(user_id: str, paper_id: str) -> list[AiAnnotation]:
     find_paper_or_404(user_id, paper_id)
 
-    path = get_annotations_path(user_id, paper_id)
     return [
         AiAnnotation(**item)
-        for item in read_json(path, [])
+        for item in read_annotation_records(user_id, paper_id)
         if not item.get("isDeleted", False)
     ]
 
@@ -37,11 +39,11 @@ def create_annotation(
     if annotation.userId != user_id:
         raise HTTPException(status_code=400, detail="Annotation userId mismatch")
 
-    path = get_annotations_path(user_id, paper_id)
-    annotations = read_json(path, [])
-
-    annotations.append(annotation.model_dump())
-    write_json(path, annotations)
+    save_annotation_record(
+        user_id=user_id,
+        paper_id=paper_id,
+        annotation=annotation.model_dump(),
+    )
 
     return annotation
 
@@ -55,8 +57,7 @@ def upsert_annotation_follow_up_explanation(
 ) -> FollowUpExplanationItem:
     find_paper_or_404(user_id, paper_id)
 
-    path = get_annotations_path(user_id, paper_id)
-    annotations = read_json(path, [])
+    annotations = read_annotation_records(user_id, paper_id)
     timestamp = now_iso()
 
     for annotation in annotations:
@@ -79,7 +80,7 @@ def upsert_annotation_follow_up_explanation(
             if follow_up.get("prompt") == prompt:
                 follow_up["response"] = response
                 follow_up["updatedAt"] = timestamp
-                write_json(path, annotations)
+                write_annotation_records(user_id, paper_id, annotations)
                 return FollowUpExplanationItem(**follow_up)
 
         follow_up = FollowUpExplanationItem(
@@ -90,7 +91,7 @@ def upsert_annotation_follow_up_explanation(
             updatedAt=timestamp,
         )
         follow_ups.append(follow_up.model_dump())
-        write_json(path, annotations)
+        write_annotation_records(user_id, paper_id, annotations)
 
         return follow_up
 
@@ -100,8 +101,7 @@ def upsert_annotation_follow_up_explanation(
 def delete_annotation(user_id: str, paper_id: str, annotation_id: str):
     find_paper_or_404(user_id, paper_id)
 
-    path = get_annotations_path(user_id, paper_id)
-    annotations = read_json(path, [])
+    annotations = read_annotation_records(user_id, paper_id)
 
     original_count = len(annotations)
 
@@ -114,7 +114,7 @@ def delete_annotation(user_id: str, paper_id: str, annotation_id: str):
     if len(annotations) == original_count:
         raise HTTPException(status_code=404, detail="Annotation not found")
 
-    write_json(path, annotations)
+    write_annotation_records(user_id, paper_id, annotations)
 
     return {
         "success": True,
@@ -125,8 +125,7 @@ def delete_annotation(user_id: str, paper_id: str, annotation_id: str):
 def delete_annotations_for_target(user_id: str, paper_id: str, target_id: str):
     find_paper_or_404(user_id, paper_id)
 
-    path = get_annotations_path(user_id, paper_id)
-    annotations = read_json(path, [])
+    annotations = read_annotation_records(user_id, paper_id)
 
     deleted_annotation_ids = [
         annotation["id"]
@@ -148,7 +147,7 @@ def delete_annotations_for_target(user_id: str, paper_id: str, target_id: str):
 
             remaining_annotations.append(annotation)
 
-        write_json(path, remaining_annotations)
+        write_annotation_records(user_id, paper_id, remaining_annotations)
     else:
         remaining_annotations = [
             annotation
@@ -156,7 +155,7 @@ def delete_annotations_for_target(user_id: str, paper_id: str, target_id: str):
             if annotation.get("target", {}).get("id") != target_id
         ]
 
-        write_json(path, remaining_annotations)
+        write_annotation_records(user_id, paper_id, remaining_annotations)
 
     return {
         "success": True,

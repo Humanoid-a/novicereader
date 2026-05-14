@@ -1,8 +1,7 @@
 from app.models.annotation import AnnotationTarget
 from app.models.context import DocumentContext, DocumentContextBlock
 from app.services.paper_service import find_paper_or_404
-from app.storage.paths import get_document_context_path
-from app.storage.json_store import read_json
+from app.storage.data_store import read_document_context
 import uuid
 
 
@@ -29,8 +28,9 @@ def build_context_for_selection(
 
     paper = find_paper_or_404(user_id, paper_id)
 
-    saved_context = read_json(
-        get_document_context_path(user_id, paper_id),
+    saved_context = read_document_context(
+        user_id,
+        paper_id,
         {
             "paperId": paper_id,
             "userId": user_id,
@@ -95,8 +95,9 @@ def build_context_for_question(
 ) -> DocumentContext:
     paper = find_paper_or_404(user_id, paper_id)
 
-    saved_context = read_json(
-        get_document_context_path(user_id, paper_id),
+    saved_context = read_document_context(
+        user_id,
+        paper_id,
         {
             "paperId": paper_id,
             "userId": user_id,

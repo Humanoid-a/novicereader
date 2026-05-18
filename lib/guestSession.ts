@@ -1,4 +1,7 @@
 import { getConfiguredApiBaseUrl } from "@/lib/deploymentConfig";
+import {
+  getLocalKnowledgeProfileRecord,
+} from "@/lib/knowledgeProfileStore";
 import type {
   AiAnnotation,
   AiExplanationContent,
@@ -7,7 +10,7 @@ import type {
 } from "@/types/annotation";
 import type { PaperRecord, PaperWithUrls } from "@/types/paper";
 import type { QuestionConversation } from "@/types/questions";
-import type { UserProfile } from "@/types/user";
+import type { UserKnowledgeProfile, UserProfile } from "@/types/user";
 
 const GUEST_DB_NAME = "novicereader_guest";
 const GUEST_DB_VERSION = 2;
@@ -263,16 +266,19 @@ export async function endGuestServerSession() {
 
 export function getGuestUserProfile(): UserProfile {
   const timestamp = nowIso();
+  const storedKnowledgeProfile = getLocalKnowledgeProfileRecord({
+    userId: GUEST_USER_ID,
+    isGuest: true,
+  })?.knowledgeProfile;
 
   return {
     id: GUEST_USER_ID,
     username: "guest",
     displayName: "Guest",
-    knowledgeProfile: {
+    knowledgeProfile: storedKnowledgeProfile ?? {
       educationLevel: "high_school",
       assumedFromEmptyOnboarding: true,
-      backgroundSummary:
-        "Guest local session. Assume a curious high-school student who may need research paper concepts explained from first principles.",
+      backgroundSummary: "",
       knownCourses: [],
       knownConcepts: [],
       knownDomains: [],
@@ -284,6 +290,39 @@ export function getGuestUserProfile(): UserProfile {
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+export async function updateGuestKnowledgeProfile(
+  knowledgeProfile: UserKnowledgeProfile,
+): Promise<UserProfile> {
+  const session = requireGuestServerSession();
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/guest/me/knowledge-profile`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getGuestSessionHeaders(session),
+      },
+      body: JSON.stringify(knowledgeProfile),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getGuestErrorMessage(response, "Failed to update knowledge profile"),
+    );
+  }
+
+  const profile = (await response.json()) as UserProfile;
+  const localGuestProfile: UserProfile = {
+    ...profile,
+    id: GUEST_USER_ID,
+    username: "guest",
+    displayName: "Guest",
+  };
+
+  return localGuestProfile;
 }
 
 export async function uploadGuestPaper(file: File): Promise<PaperWithUrls> {
@@ -501,11 +540,50 @@ export async function createGuestPaperAnnotation(
 
   const savedAnnotation = (await response.json()) as AiAnnotation;
   const annotations = await readGuestAnnotations(paperId);
-  const nextAnnotations = [...annotations, savedAnnotation];
+  const nextAnnotations = annotations.some(
+    (annotation) => annotation.id === savedAnnotation.id,
+  )
+    ? annotations.map((annotation) =>
+        annotation.id === savedAnnotation.id ? savedAnnotation : annotation,
+      )
+    : [...annotations, savedAnnotation];
 
   await syncGuestPaperAnnotations(paperId, nextAnnotations);
 
   return savedAnnotation;
+}
+
+export async function deleteGuestAnnotation({
+  paperId,
+  annotationId,
+}: {
+  paperId: string;
+  annotationId: string;
+}) {
+  const session = getStoredGuestServerSession();
+  const annotations = await readGuestAnnotations(paperId);
+
+  if (session) {
+    await fetch(
+      `${getApiBaseUrl()}/api/guest/papers/${paperId}/annotations/${annotationId}`,
+      {
+        method: "DELETE",
+        headers: getGuestSessionHeaders(session),
+      },
+    ).catch(() => {
+      // Local backup deletion still proceeds if the cloud request fails.
+    });
+  }
+
+  await syncGuestPaperAnnotations(
+    paperId,
+    annotations.filter((annotation) => annotation.id !== annotationId),
+  );
+
+  return {
+    success: true,
+    deletedAnnotationId: annotationId,
+  };
 }
 
 export async function deleteGuestAnnotationTarget({
@@ -572,12 +650,16 @@ export async function deleteGuestAnnotationTarget({
 
 export async function explainGuestSelection({
   target,
+  targets,
   prompt,
   paperId,
+  knowledgeProfile,
 }: {
   paperId: string;
-  target: AnnotationTarget;
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   prompt: string;
+  knowledgeProfile?: UserKnowledgeProfile | null;
 }): Promise<{ explanation: AiExplanationContent }> {
   const session = requireGuestServerSession();
   const response = await fetch(`${getApiBaseUrl()}/api/guest/explain`, {
@@ -588,8 +670,10 @@ export async function explainGuestSelection({
     },
     body: JSON.stringify({
       paperId,
-      target,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
       prompt,
+      knowledgeProfile: knowledgeProfile ?? null,
     }),
   });
 
@@ -600,20 +684,62 @@ export async function explainGuestSelection({
   return response.json();
 }
 
+export async function summarizeGuestSelection({
+  target,
+  targets,
+  prompt,
+  paperId,
+  knowledgeProfile,
+}: {
+  paperId: string;
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
+  prompt: string;
+  knowledgeProfile?: UserKnowledgeProfile | null;
+}): Promise<{ explanation: AiExplanationContent }> {
+  const session = requireGuestServerSession();
+  const response = await fetch(`${getApiBaseUrl()}/api/guest/summarize`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getGuestSessionHeaders(session),
+    },
+    body: JSON.stringify({
+      paperId,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
+      prompt,
+      knowledgeProfile: knowledgeProfile ?? null,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getGuestErrorMessage(response, "Failed to summarize selection"));
+  }
+
+  return response.json();
+}
+
 export async function explainGuestFollowUpConcept({
   paperId,
   annotationId,
   target,
+  targets,
   annotationPrompt,
   annotationExplanation,
   followUpPoint,
+  responseKind,
+  knowledgeProfile,
 }: {
   paperId: string;
   annotationId: string;
-  target: AnnotationTarget;
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   annotationPrompt: string;
   annotationExplanation: string;
   followUpPoint: string;
+  responseKind?: "explanation" | "summary";
+  knowledgeProfile?: UserKnowledgeProfile | null;
 }): Promise<{
   explanation: AiExplanationContent;
   followUp: FollowUpExplanationItem;
@@ -628,10 +754,13 @@ export async function explainGuestFollowUpConcept({
     body: JSON.stringify({
       paperId,
       annotationId,
-      target,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
       annotationPrompt,
       annotationExplanation,
       followUpPoint,
+      responseKind: responseKind ?? null,
+      knowledgeProfile: knowledgeProfile ?? null,
     }),
   });
 
@@ -651,15 +780,32 @@ export async function explainGuestFollowUpConcept({
 
     return {
       ...annotation,
-      explanation: {
-        ...annotation.explanation,
-        followUpExplanations: [
-          ...(annotation.explanation.followUpExplanations ?? []).filter(
-            (savedFollowUp) => savedFollowUp.prompt !== followUpPoint,
-          ),
-          result.followUp,
-        ],
-      },
+      ...(responseKind === "summary"
+        ? {
+            summary: {
+              ...(annotation.summary ?? annotation.explanation),
+              followUpExplanations: [
+                ...(
+                  annotation.summary?.followUpExplanations ??
+                  []
+                ).filter(
+                  (savedFollowUp) => savedFollowUp.prompt !== followUpPoint,
+                ),
+                result.followUp,
+              ],
+            },
+          }
+        : {
+            explanation: {
+              ...annotation.explanation,
+              followUpExplanations: [
+                ...(annotation.explanation.followUpExplanations ?? []).filter(
+                  (savedFollowUp) => savedFollowUp.prompt !== followUpPoint,
+                ),
+                result.followUp,
+              ],
+            },
+          }),
     };
   });
 
@@ -723,14 +869,20 @@ export async function askGuestAiQuestion({
   conversationId,
   annotationId,
   target,
+  targets,
   annotationExplanation,
+  responseKind,
+  knowledgeProfile,
 }: {
   paperId: string;
   message: string;
   conversationId?: string | null;
   annotationId?: string | null;
   target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   annotationExplanation?: string | null;
+  responseKind?: "explanation" | "summary";
+  knowledgeProfile?: UserKnowledgeProfile | null;
 }) {
   const session = requireGuestServerSession();
   const response = await fetch(`${getApiBaseUrl()}/api/guest/ask`, {
@@ -744,8 +896,11 @@ export async function askGuestAiQuestion({
       message,
       conversationId: conversationId ?? null,
       annotationId: annotationId ?? null,
-      target: target ?? null,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
       annotationExplanation: annotationExplanation ?? null,
+      responseKind: responseKind ?? null,
+      knowledgeProfile: knowledgeProfile ?? null,
     }),
   });
 

@@ -1,45 +1,5 @@
 [
   {
-    "id": "novicereader",
-    "username": "novicereader",
-    "displayName": "Andy Wang",
-    "knowledgeProfile": {
-      "educationLevel": "high_school",
-      "assumedFromEmptyOnboarding": true,
-      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
-      "knownCourses": [],
-      "knownConcepts": [],
-      "knownDomains": [],
-      "learningGoals": [],
-      "weakAreas": [],
-      "explanationPreference": "beginner-friendly",
-      "explanationDepth": "gentle"
-    },
-    "createdAt": "2026-05-11T09:41:52.783361+00:00",
-    "updatedAt": "2026-05-11T09:41:52.783361+00:00",
-    "passwordHash": "$argon2id$v=19$m=65536,t=3,p=4$f4/emNuB/MS72VPmZERfXw$88ovQmWt8rohe+g73nHmlywaQEXYGdSH+RFqjt5/qNE",
-    "disabled": false
-  },
-  {
-    "id": "guest-e22cc86720414898ab49a147",
-    "username": "guest-e22cc86720414898ab49a147",
-    "displayName": "Guest",
-    "knowledgeProfile": {
-      "educationLevel": "high_school",
-      "assumedFromEmptyOnboarding": true,
-      "backgroundSummary": "No onboarding answers yet. Assume a curious high-school student who may need technical terms, math notation, and research methods explained from first principles.",
-      "knownCourses": [],
-      "knownConcepts": [],
-      "knownDomains": [],
-      "learningGoals": [],
-      "weakAreas": [],
-      "explanationPreference": "beginner-friendly",
-      "explanationDepth": "gentle"
-    },
-    "createdAt": "2026-05-14T00:17:06.588133+00:00",
-    "updatedAt": "2026-05-14T00:17:06.588133+00:00"
-  },
-  {
     "id": "guest-dd248743b21047fd973d952e",
     "username": "guest-dd248743b21047fd973d952e",
     "displayName": "Guest",
@@ -78,5 +38,70 @@
     "updatedAt": "2026-05-14T02:54:25.632141+00:00",
     "passwordHash": "$argon2id$v=19$m=65536,t=3,p=4$FBsrDdWbBLK3ZrJ5DWoM+Q$kHwY69IZ5oag7JU/dnst99sQ7iz5BohKB1/ZuP7+zaA",
     "disabled": false
+  },
+  {
+    "id": "guest-e22cc86720414898ab49a147",
+    "username": "guest-e22cc86720414898ab49a147",
+    "displayName": "Guest",
+    "knowledgeProfile": {
+      "educationLevel": "high_school",
+      "assumedFromEmptyOnboarding": false,
+      "backgroundSummary": "test",
+      "knownCourses": [],
+      "knownConcepts": [],
+      "knownDomains": [],
+      "learningGoals": [],
+      "weakAreas": [],
+      "explanationPreference": "beginner-friendly",
+      "explanationDepth": "gentle"
+    },
+    "createdAt": "2026-05-14T00:17:06.588133+00:00",
+    "updatedAt": "2026-05-16T09:40:41.424300+00:00"
+  },
+  {
+    "id": "novicereader",
+    "username": "novicereader",
+    "displayName": "Andy Wang",
+    "knowledgeProfile": {
+      "educationLevel": "high_school",
+      "assumedFromEmptyOnboarding": false,
+      "backgroundSummary": "An undergraduate computer science student comfortable with programming, algorithms, and basic discrete math.",
+      "knownCourses": [],
+      "knownConcepts": [],
+      "knownDomains": [
+        "computer science"
+      ],
+      "learningGoals": [],
+      "weakAreas": [],
+      "explanationPreference": "beginner-friendly",
+      "explanationDepth": "gentle"
+    },
+    "createdAt": "2026-05-11T09:41:52.783361+00:00",
+    "updatedAt": "2026-05-18T09:59:11.655559+00:00",
+    "passwordHash": "$argon2id$v=19$m=65536,t=3,p=4$f4/emNuB/MS72VPmZERfXw$88ovQmWt8rohe+g73nHmlywaQEXYGdSH+RFqjt5/qNE",
+    "disabled": false,
+    "knowledgeProfiles": [
+      {
+        "id": "8802827b-6cfd-4230-a3e0-13178f8abb70",
+        "name": "Highschool",
+        "knowledgeProfile": {
+          "educationLevel": "high_school",
+          "assumedFromEmptyOnboarding": false,
+          "backgroundSummary": "An undergraduate computer science student comfortable with programming, algorithms, and basic discrete math.",
+          "knownCourses": [],
+          "knownConcepts": [],
+          "knownDomains": [
+            "computer science"
+          ],
+          "learningGoals": [],
+          "weakAreas": [],
+          "explanationPreference": "beginner-friendly",
+          "explanationDepth": "gentle"
+        },
+        "createdAt": "2026-05-18T09:41:07.331978+00:00",
+        "updatedAt": "2026-05-18T09:59:04.956123+00:00"
+      }
+    ],
+    "selectedKnowledgeProfileId": "8802827b-6cfd-4230-a3e0-13178f8abb70"
   }
 ]

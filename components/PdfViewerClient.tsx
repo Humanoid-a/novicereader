@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type {
   AiAnnotation,
+  AnnotationTarget,
   RegionAnnotationTarget,
   SelectionTool,
   TextAnnotationTarget,
@@ -12,7 +13,7 @@ import type {
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { createId } from "@/lib/id";
-import { getAuthHeaders } from "@/lib/api";
+import { getStoredAuthToken } from "@/lib/api";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   "react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
@@ -33,10 +34,12 @@ type PdfViewerClientProps = {
     trackVisualPosition?: boolean;
   } | null;
   currentSelection?: TextAnnotationTarget | RegionAnnotationTarget | null;
+  currentSelectionTargets?: (TextAnnotationTarget | RegionAnnotationTarget)[];
   onPageStatusChange: (status: { currentPage: number; numPages: number }) => void;
-  onTextSelected: (target: TextAnnotationTarget) => void;
-  onRegionSelected: (region: RegionAnnotationTarget) => void;
-  onAnnotationContextMenu: (annotations: AiAnnotation[]) => void;
+  onTextSelected: (target: TextAnnotationTarget, append: boolean) => void;
+  onRegionSelected: (region: RegionAnnotationTarget, append: boolean) => void;
+  onAnnotationContextMenu: (annotations: AiAnnotation[], append: boolean) => void;
+  onSelectionContextMenu: (targets: AnnotationTarget[], append: boolean) => void;
   onAnnotationContextMenuEmpty: () => void;
 };
 
@@ -47,6 +50,9 @@ type DraftRegion = {
   currentX: number;
   currentY: number;
 };
+
+const EMPTY_SELECTION_TARGETS: (TextAnnotationTarget | RegionAnnotationTarget)[] =
+  [];
 
 
 function clamp(value: number, min: number, max: number) {
@@ -59,6 +65,22 @@ function easeOutCubic(progress: number) {
 
 function getFastScrollDuration(distance: number) {
   return Math.min(Math.max(distance / 6, 120), 220);
+}
+
+function getPdfFetchUrl(fileUrl: string) {
+  const token = getStoredAuthToken();
+
+  if (!token) {
+    return fileUrl;
+  }
+
+  const url = new URL(fileUrl, window.location.href);
+
+  if (url.pathname.startsWith("/api/papers/")) {
+    url.searchParams.set("access_token", token);
+  }
+
+  return url.toString();
 }
 
 function mergeTextSelectionChunks(
@@ -143,6 +165,102 @@ function getTextChunkBounds(chunks: TextAnnotationTarget["chunks"]) {
     width: right - left,
     height: bottom - top,
   };
+}
+
+function getTextHighlightChunks(
+  chunks: TextAnnotationTarget["chunks"]
+): TextAnnotationTarget["chunks"] {
+  const sortedChunks = chunks
+    .map((chunk) => ({
+      ...chunk,
+      rect: { ...chunk.rect },
+    }))
+    .sort((first, second) => {
+      const firstCenterY = first.rect.y + first.rect.height / 2;
+      const secondCenterY = second.rect.y + second.rect.height / 2;
+
+      if (Math.abs(firstCenterY - secondCenterY) > 0.001) {
+        return firstCenterY - secondCenterY;
+      }
+
+      return first.rect.x - second.rect.x;
+    });
+
+  if (sortedChunks.length < 2) {
+    return sortedChunks;
+  }
+
+  const sortedHeights = sortedChunks
+    .map((chunk) => chunk.rect.height)
+    .filter((height) => height > 0)
+    .sort((first, second) => first - second);
+  const medianHeight =
+    sortedHeights[Math.floor(sortedHeights.length / 2)] ?? 0;
+  const verticalPadding = Math.min(medianHeight * 0.08, 0.002);
+  const closeLineGapLimit = medianHeight * 0.7;
+  const lineMetrics = sortedChunks.map((chunk) => {
+    const top = chunk.rect.y;
+    const bottom = chunk.rect.y + chunk.rect.height;
+
+    return {
+      top,
+      bottom,
+      center: top + chunk.rect.height / 2,
+      height: chunk.rect.height,
+    };
+  });
+
+  return sortedChunks.map((chunk, index) => {
+    const current = lineMetrics[index];
+    const previous = lineMetrics[index - 1];
+    const next = lineMetrics[index + 1];
+    const previousBoundary = previous
+      ? (previous.center + current.center) / 2
+      : null;
+    const nextBoundary = next ? (current.center + next.center) / 2 : null;
+    const previousGap = previous ? current.top - previous.bottom : Infinity;
+    const nextGap = next ? next.top - current.bottom : Infinity;
+    let top = Math.max(0, current.top - verticalPadding);
+    let bottom = Math.min(1, current.bottom + verticalPadding);
+
+    if (previousBoundary !== null) {
+      top =
+        previousGap <= closeLineGapLimit
+          ? previousBoundary
+          : Math.max(top, Math.min(previousBoundary, current.center));
+    }
+
+    if (nextBoundary !== null) {
+      bottom =
+        nextGap <= closeLineGapLimit
+          ? nextBoundary
+          : Math.min(bottom, Math.max(nextBoundary, current.center));
+    }
+
+    if (bottom <= top) {
+      const safeHalfHeight = Math.max(current.height * 0.35, 0.0001);
+      const minTop = previousBoundary ?? 0;
+      const maxBottom = nextBoundary ?? 1;
+
+      top = clamp(current.center - safeHalfHeight, minTop, current.center);
+      bottom = clamp(current.center + safeHalfHeight, current.center, maxBottom);
+    }
+
+    return {
+      ...chunk,
+      rect: {
+        ...chunk.rect,
+        y: top,
+        height: Math.max(bottom - top, 0),
+      },
+    };
+  });
+}
+
+function getAnnotationTargets(
+  annotation: AiAnnotation
+): (TextAnnotationTarget | RegionAnnotationTarget)[] {
+  return annotation.targets?.length ? annotation.targets : [annotation.target];
 }
 
 function getTextChunksForPage(annotation: AiAnnotation, pageNumber: number) {
@@ -248,6 +366,28 @@ function getHitAnnotationTargets(
       (first, second) =>
         getAnnotationCreatedAtMs(second) - getAnnotationCreatedAtMs(first)
     );
+}
+
+function getHitSelectionTargets(
+  targets: (TextAnnotationTarget | RegionAnnotationTarget)[],
+  pageNumber: number,
+  point: { x: number; y: number }
+) {
+  return targets
+    .filter((target) => {
+      const bounds = getTargetBoundsForPage(target, pageNumber);
+
+      return bounds ? rectContainsPoint(bounds, point) : false;
+    })
+    .sort((first, second) => {
+      const firstTimestamp = new Date(first.createdAt).getTime();
+      const secondTimestamp = new Date(second.createdAt).getTime();
+
+      return (
+        (Number.isFinite(secondTimestamp) ? secondTimestamp : 0) -
+        (Number.isFinite(firstTimestamp) ? firstTimestamp : 0)
+      );
+    });
 }
 
 function areSameIds(first: string[], second: string[]) {
@@ -358,18 +498,38 @@ function getNewestAnnotationsForTargets(annotations: AiAnnotation[]) {
   const newestAnnotationsByTarget = new Map<string, AiAnnotation>();
 
   for (const annotation of annotations) {
-    const existingAnnotation = newestAnnotationsByTarget.get(annotation.target.id);
+    for (const target of getAnnotationTargets(annotation)) {
+      const existingAnnotation = newestAnnotationsByTarget.get(target.id);
 
-    if (
-      !existingAnnotation ||
-      getAnnotationCreatedAtMs(annotation) >
-        getAnnotationCreatedAtMs(existingAnnotation)
-    ) {
-      newestAnnotationsByTarget.set(annotation.target.id, annotation);
+      if (
+        !existingAnnotation ||
+        getAnnotationCreatedAtMs(annotation) >
+          getAnnotationCreatedAtMs(existingAnnotation)
+      ) {
+        newestAnnotationsByTarget.set(target.id, {
+          ...annotation,
+          target,
+          targets: getAnnotationTargets(annotation),
+        });
+      }
     }
   }
 
   return Array.from(newestAnnotationsByTarget.values());
+}
+
+function getAnnotationTargetInstances(annotations: AiAnnotation[]) {
+  return annotations.flatMap((annotation) =>
+    getAnnotationTargets(annotation).map((target) => ({
+      ...annotation,
+      target,
+      targets: getAnnotationTargets(annotation),
+    }))
+  );
+}
+
+function uniqueIds(ids: string[]) {
+  return Array.from(new Set(ids));
 }
 
 export default function PdfViewerClient({
@@ -380,15 +540,19 @@ export default function PdfViewerClient({
   visualZoom,
   targetToReveal,
   currentSelection,
+  currentSelectionTargets = EMPTY_SELECTION_TARGETS,
   onPageStatusChange,
   onTextSelected,
   onRegionSelected,
   onAnnotationContextMenu,
+  onSelectionContextMenu,
   onAnnotationContextMenuEmpty,
 }: PdfViewerClientProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [draftRegion, setDraftRegion] = useState<DraftRegion | null>(null);
+  const [resolvedPdfUrl, setResolvedPdfUrl] = useState<string | null>(null);
+  const [pdfFetchError, setPdfFetchError] = useState("");
   const [hoveredAnnotationTargetIds, setHoveredAnnotationTargetIds] = useState<
     string[]
   >([]);
@@ -397,6 +561,60 @@ export default function PdfViewerClient({
   const lastRevealKeyRef = useRef<string | null>(null);
   const revealAnimationFrameRef = useRef<number | null>(null);
   const visiblePageRatios = useRef<Record<number, number>>({});
+  const pendingTextSelectionAppendRef = useRef(false);
+
+  useEffect(() => {
+    let isActive = true;
+    let objectUrl: string | null = null;
+
+    setResolvedPdfUrl(null);
+    setPdfFetchError("");
+
+    if (fileUrl.startsWith("blob:") || fileUrl.startsWith("data:")) {
+      setResolvedPdfUrl(fileUrl);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    async function fetchPdf() {
+      try {
+        const pdfFetchUrl = getPdfFetchUrl(fileUrl);
+        const response = await fetch(pdfFetchUrl);
+
+        if (!response.ok) {
+          throw new Error(`PDF request failed with status ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+
+        if (isActive) {
+          setResolvedPdfUrl(objectUrl);
+        }
+      } catch (error) {
+        console.error("Failed to fetch PDF", {
+          fileUrl,
+          pdfFetchUrl: getPdfFetchUrl(fileUrl),
+          error,
+        });
+
+        if (isActive) {
+          setPdfFetchError("Failed to load PDF file.");
+        }
+      }
+    }
+
+    fetchPdf();
+
+    return () => {
+      isActive = false;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [fileUrl]);
 
   function cancelRevealAnimation() {
     if (revealAnimationFrameRef.current === null) {
@@ -532,15 +750,26 @@ export default function PdfViewerClient({
 
     lastRevealKeyRef.current = revealKey;
 
-    const annotation = annotations.find(
-      (annotation) => annotation.target.id === targetToReveal.targetId
+    const annotation = annotations.find((annotation) =>
+      getAnnotationTargets(annotation).some(
+        (target) => target.id === targetToReveal.targetId
+      )
+    );
+    const annotationTarget = annotation
+      ? getAnnotationTargets(annotation).find(
+          (target) => target.id === targetToReveal.targetId
+        )
+      : null;
+    const activeSelectionTarget = currentSelectionTargets.find(
+      (target) => target.id === targetToReveal.targetId
     );
     const target =
-      annotation?.target?.id === targetToReveal.targetId
-        ? annotation.target
-        : currentSelection?.id === targetToReveal.targetId
-          ? currentSelection
-          : null;
+      annotationTarget
+        ? annotationTarget
+        : activeSelectionTarget ??
+          (currentSelection?.id === targetToReveal.targetId
+            ? currentSelection
+            : null);
 
     if (!target) {
       return;
@@ -560,8 +789,8 @@ export default function PdfViewerClient({
     }
 
     const bounds =
-      annotation && annotation.target.id === target.id
-        ? getAnnotationBoundsForPage(annotation, pageNumber)
+      annotation && annotationTarget
+        ? getTargetBoundsForPage(annotationTarget, pageNumber)
         : getTargetBoundsForPage(target, pageNumber);
     const scrollContainer = findScrollableParent(pageElement);
 
@@ -598,10 +827,35 @@ export default function PdfViewerClient({
       targetToReveal.animation,
       targetToReveal.behavior
     );
-  }, [annotations, currentSelection, targetToReveal, visualZoom]);
+  }, [
+    annotations,
+    currentSelection,
+    currentSelectionTargets,
+    targetToReveal,
+    visualZoom,
+  ]);
 
-  function handleTextMouseUp() {
+  function handleTextMouseDown(event: React.MouseEvent) {
+    if (selectionTool !== "highlight" || event.button !== 0) {
+      return;
+    }
+
+    pendingTextSelectionAppendRef.current = event.shiftKey;
+
+    if (event.shiftKey) {
+      window.getSelection()?.removeAllRanges();
+    }
+  }
+
+  function handleTextMouseUp(event: React.MouseEvent) {
+  const shouldAppend = pendingTextSelectionAppendRef.current || event.shiftKey;
+  pendingTextSelectionAppendRef.current = false;
+
   if (selectionTool !== "highlight") {
+    return;
+  }
+
+  if (event.button !== 0) {
     return;
   }
 
@@ -686,7 +940,8 @@ export default function PdfViewerClient({
     createdAt: new Date().toISOString(),
   };
 
-  onTextSelected(textTarget);
+  onTextSelected(textTarget, shouldAppend);
+  window.getSelection()?.removeAllRanges();
 }
 
   function getPointInPage(event: React.MouseEvent, pageNumber: number) {
@@ -731,13 +986,15 @@ export default function PdfViewerClient({
     }
 
     const hitTargetIds = getHitAnnotationTargets(
-      annotationOverlays,
+      annotationHitTargets,
       pageNumber,
       point
     ).map((annotation) => annotation.target.id);
 
     setHoveredAnnotationTargetIds((currentIds) =>
-      areSameIds(currentIds, hitTargetIds) ? currentIds : hitTargetIds
+      areSameIds(currentIds, uniqueIds(hitTargetIds))
+        ? currentIds
+        : uniqueIds(hitTargetIds)
     );
   }
 
@@ -745,27 +1002,40 @@ export default function PdfViewerClient({
     event: React.MouseEvent,
     pageNumber: number
   ) {
+    event.preventDefault();
+    event.stopPropagation();
+    window.getSelection()?.removeAllRanges();
+
     const point = getNormalizedPointInPage(event, pageNumber);
 
     if (!point) {
+      onAnnotationContextMenuEmpty();
       return;
     }
 
     const hitAnnotations = getHitAnnotationTargets(
-      annotationOverlays,
+      annotationHitTargets,
       pageNumber,
       point
     );
 
     if (hitAnnotations.length === 0) {
+      const selectedTargets = getHitSelectionTargets(
+        currentSelectionTargets,
+        pageNumber,
+        point
+      );
+
+      if (selectedTargets.length > 0) {
+        onSelectionContextMenu(selectedTargets, event.shiftKey);
+        return;
+      }
+
       onAnnotationContextMenuEmpty();
       return;
     }
 
-    event.preventDefault();
-    event.stopPropagation();
-
-    onAnnotationContextMenu(hitAnnotations);
+    onAnnotationContextMenu(hitAnnotations, event.shiftKey);
   }
 
   function handlePdfLinkClick(event: React.MouseEvent) {
@@ -944,25 +1214,25 @@ export default function PdfViewerClient({
       createdAt: new Date().toISOString(),
     };
 
-    onRegionSelected(region);
+    onRegionSelected(region, event.shiftKey);
   }
 
   const pageWidth = Math.round(900 * zoom);
   const visualScale = zoom > 0 ? visualZoom / zoom : 1;
-  const annotationOverlays = getNewestAnnotationsForTargets(annotations);
+  const activeSelectionTargetIds = new Set(
+    currentSelectionTargets.map((target) => target.id)
+  );
+  const annotationHitTargets = getAnnotationTargetInstances(annotations);
+  const annotationOverlays = getNewestAnnotationsForTargets(annotations).filter(
+    (annotation) => !activeSelectionTargetIds.has(annotation.target.id)
+  );
   const pdfFile = useMemo(
-    () => ({ url: fileUrl, httpHeaders: getAuthHeaders() }) as { url: string },
-    [fileUrl]
+    () => (resolvedPdfUrl ? ({ url: resolvedPdfUrl } as { url: string }) : null),
+    [resolvedPdfUrl]
   );
 
   return (
     <div className="flex w-full flex-col items-center gap-3">
-      {selectionTool === "region" && (
-        <div className="w-full rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Region mode: drag a box around an equation, figure, or table.
-        </div>
-      )}
-
       <div className="flex w-full flex-col items-center gap-4 rounded-lg bg-slate-200 p-2">
       <div
         className="flex w-full flex-col items-center gap-4"
@@ -970,8 +1240,11 @@ export default function PdfViewerClient({
           zoom: visualScale,
         }}
       >
-      <Document
-        file={pdfFile}
+      {pdfFetchError ? (
+        <p>{pdfFetchError}</p>
+      ) : pdfFile ? (
+        <Document
+          file={pdfFile}
           onLoadSuccess={({ numPages }) => {
             setNumPages(numPages);
             setCurrentPage(1);
@@ -993,6 +1266,19 @@ export default function PdfViewerClient({
       (chunk) => chunk.pageNumber === pageNumber
     )
 );
+            const activeRegionSelectionTargetsForPage =
+              currentSelectionTargets.filter(
+                (target): target is RegionAnnotationTarget =>
+                  target.type === "region" && target.pageNumber === pageNumber
+              );
+            const activeTextSelectionTargetsForPage =
+              currentSelectionTargets.filter(
+                (target): target is TextAnnotationTarget =>
+                  target.type === "text" &&
+                  (target.chunks ?? []).some(
+                    (chunk) => chunk.pageNumber === pageNumber
+                  )
+              );
             const isActiveDraftPage =
               draftRegion?.pageNumber === pageNumber && selectionTool === "region";
 
@@ -1016,6 +1302,7 @@ export default function PdfViewerClient({
                 ref={(element) => {
                   pageRefs.current[pageNumber] = element;
                 }}
+                onMouseDownCapture={handleTextMouseDown}
                 onMouseDown={(event) =>
                   handleRegionMouseDown(event, pageNumber)
                 }
@@ -1034,7 +1321,7 @@ export default function PdfViewerClient({
                   if (selectionTool === "region") {
                     handleRegionMouseUp(event, pageNumber);
                   } else {
-                    handleTextMouseUp();
+                    handleTextMouseUp(event);
                   }
                 }}
                 onClick={handlePdfLinkClick}
@@ -1151,9 +1438,82 @@ export default function PdfViewerClient({
   );
 })}
 
+                {activeTextSelectionTargetsForPage.map((target) => {
+                  const chunksForPage = getTextHighlightChunks(
+                    mergeTextSelectionChunks(
+                      (target.chunks ?? []).filter(
+                        (chunk) => chunk.pageNumber === pageNumber
+                      )
+                    )
+                  );
+                  const bounds = getTextChunkBounds(chunksForPage);
+
+                  if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
+                    return null;
+                  }
+
+                  const isFocused = currentSelection?.id === target.id;
+
+                  return (
+                    <div
+                      key={`active_text_${target.id}_page_${pageNumber}`}
+                      className="pointer-events-none absolute z-30 bg-transparent"
+                      style={{
+                        left: `${bounds.x * 100}%`,
+                        top: `${bounds.y * 100}%`,
+                        width: `${bounds.width * 100}%`,
+                        height: `${bounds.height * 100}%`,
+                      }}
+                    >
+                      {chunksForPage.map((chunk) => {
+                        const { rect } = chunk;
+
+                        return (
+                          <span
+                            key={`active_${chunk.id}`}
+                            className={`pointer-events-none absolute transition ${
+                              isFocused
+                                ? "bg-sky-200/25"
+                                : "bg-sky-200/20"
+                            }`}
+                            style={{
+                              left: `${((rect.x - bounds.x) / bounds.width) * 100}%`,
+                              top: `${((rect.y - bounds.y) / bounds.height) * 100}%`,
+                              width: `${(rect.width / bounds.width) * 100}%`,
+                              height: `${(rect.height / bounds.height) * 100}%`,
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+
+                {activeRegionSelectionTargetsForPage.map((target) => {
+                  const { rect } = target;
+                  const isFocused = currentSelection?.id === target.id;
+
+                  return (
+                    <div
+                      key={`active_region_${target.id}`}
+                      className={`pointer-events-none absolute z-30 border transition ${
+                        isFocused
+                          ? "border-sky-400/45 bg-sky-200/10"
+                          : "border-sky-300/35 bg-sky-200/5"
+                      }`}
+                      style={{
+                        left: `${rect.x * 100}%`,
+                        top: `${rect.y * 100}%`,
+                        width: `${rect.width * 100}%`,
+                        height: `${rect.height * 100}%`,
+                      }}
+                    />
+                  );
+                })}
+
                 {isActiveDraftPage && (
                   <div
-                    className="pointer-events-none absolute border-2 border-blue-500 bg-blue-500/20"
+                    className="pointer-events-none absolute border border-sky-400/55 bg-sky-200/10"
                     style={{
                       left: selectionLeft,
                       top: selectionTop,
@@ -1166,6 +1526,9 @@ export default function PdfViewerClient({
             );
           })}
         </Document>
+      ) : (
+        <p>Loading PDF...</p>
+      )}
         </div>
       </div>
     </div>

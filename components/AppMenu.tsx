@@ -17,6 +17,11 @@ const menuItems: AppMenuItem[] = [
     icon: HomeIcon,
   },
   {
+    label: "Knowledge profile",
+    href: "/profile",
+    icon: ProfileIcon,
+  },
+  {
     label: "Help",
     href: "/help",
     icon: HelpIcon,
@@ -70,6 +75,30 @@ function HelpIcon({ className = "" }: { className?: string }) {
         d="M9.8 9.4a2.2 2.2 0 0 1 4.3.6c0 1.8-2.1 1.9-2.1 3.6M12 16.8h.01"
         stroke="currentColor"
         strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function ProfileIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 12.2a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M5.5 19.2c.8-3.2 3.1-4.8 6.5-4.8s5.7 1.6 6.5 4.8"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M18.6 5.2h1.9M19.5 4.3v1.8"
+        stroke="currentColor"
+        strokeWidth="1.5"
         strokeLinecap="round"
       />
     </svg>

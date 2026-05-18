@@ -21,6 +21,7 @@ load_dotenv(BACKEND_DIR / ".env")
 from app.storage.data_store import (  # noqa: E402
     ensure_database_schema,
     is_database_enabled,
+    save_paper_analysis_profile_record,
     save_paper_record,
     save_token_usage_record,
     save_user_record,
@@ -38,6 +39,7 @@ from app.storage.paths import (  # noqa: E402
     get_annotations_path,
     get_chat_thread_path,
     get_document_context_path,
+    get_paper_analysis_profile_path,
     get_user_paper_dir,
     get_user_token_usage_path,
 )
@@ -94,6 +96,13 @@ def migrate_papers() -> int:
                 },
             ),
         )
+        analysis_profile = read_json(
+            get_paper_analysis_profile_path(paper["userId"], paper["id"]),
+            None,
+        )
+
+        if isinstance(analysis_profile, dict):
+            save_paper_analysis_profile_record(analysis_profile)
 
     return len(papers)
 

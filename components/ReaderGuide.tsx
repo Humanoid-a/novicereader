@@ -21,61 +21,78 @@ type GuideStep = {
   body: string;
   demo:
     | "text-selection"
-    | "ai-explanation"
-    | "follow-ups"
     | "region-tool"
-    | "ask-ai"
+    | "ai-actions"
     | "right-click"
+    | "multiselect"
+    | "hover-preview"
+    | "undo"
+    | "ask-ai"
     | "delete";
 };
 
 const guideSteps: GuideStep[] = [
   {
     selector: '[data-guide="selection-preview"]',
-    title: "1. Highlight text",
+    title: "1. Selecting from text",
     body:
-      "Drag across a sentence in the PDF. The demo text is now shown in the Selection box.",
+      "Drag across text in the PDF to highlight it. The selected passage appears in the Selection box.",
     demo: "text-selection",
   },
   {
-    selector: '[data-guide="explain-selection"]',
-    title: "2. Ask for an annotation explanation",
-    body:
-      "After text or a region is selected, click this button. NoviceReader saves the annotation and writes a short explanation beside the paper.",
-    demo: "ai-explanation",
-  },
-  {
-    selector: '[data-guide="ai-response"]',
-    title: "3. Explore follow-up points",
-    body:
-      "The explanation appears here, with follow-up points listed below it.",
-    demo: "follow-ups",
-  },
-  {
     selector: '[data-guide="selection-toolbox"]',
-    title: "4. Switch to region selection",
+    title: "2. Switch selection tools",
     body:
-      "The tool switches from text highlighting to region selection, then places a demo cropped region in the Selection box.",
+      "Use the small toolbox above the PDF to switch between text highlighting and region selection.",
     demo: "region-tool",
   },
   {
-    selector: '[data-guide="ask-ai-panel"]',
-    title: "5. Ask AI about the paper",
-    body: "Ask a specific question here. Active selections can be included as context.",
-    demo: "ask-ai",
+    selector: '[data-guide="ai-request-buttons"]',
+    title: "3. Explain or summarize",
+    body:
+      "Click Explain for a teaching-style explanation, or Summary for a shorter author-perspective summary of the selected area.",
+    demo: "ai-actions",
   },
   {
     selector: '[data-guide="pdf-viewer"]',
-    title: "6. Reopen a saved annotation",
+    title: "4. Right-click to select",
     body:
-      "The demo region annotation is selected now. In normal use, right-click a saved annotation to reopen it.",
+      "Right-click an existing highlighted text or region box to select it and reopen its saved annotation.",
     demo: "right-click",
   },
   {
-    selector: '[data-guide="selection-actions"]',
-    title: "7. Delete annotations",
+    selector: '[data-guide="pdf-viewer"]',
+    title: "5. Hold Shift for multiple",
     body:
-      "When an annotation is selected, use the small trash button near the Selection heading to remove the highlighted or cropped area from the PDF.",
+      "Hold Shift while right-clicking another saved item to add it to the current selection instead of replacing the selection.",
+    demo: "multiselect",
+  },
+  {
+    selector: '[data-guide="selection-preview"]',
+    title: "6. Check each selected item",
+    body:
+      "Hover over a small Selection icon to preview exactly which text or region it represents.",
+    demo: "hover-preview",
+  },
+  {
+    selector: '[data-guide="selection-actions"]',
+    title: "7. Undo selection mistakes",
+    body:
+      "When making mistakes or misselecting, press the undo button or Ctrl/Cmd+Z to go back.",
+    demo: "undo",
+  },
+  {
+    selector: '[data-guide="ask-ai-panel"]',
+    title: "8. Ask follow-up questions",
+    body:
+      "Use the Ask box to ask about the whole article, the current selected region, or the saved annotation attached to it.",
+    demo: "ask-ai",
+  },
+  {
+    selector: '[data-guide="delete-annotation"]',
+    title: "9. Delete selected annotation",
+    body:
+      "Press the trash button to delete the selected annotation.",
     demo: "delete",
   },
 ];
@@ -108,6 +125,26 @@ function renderStepDemo(step: GuideStep) {
           <MouseRightClickIcon />
         </span>
         Right-click the annotation area to select it again.
+      </div>
+    );
+  }
+
+  if (step.demo === "multiselect") {
+    return (
+      <div className="rounded-lg bg-slate-100 p-2 text-xs leading-5 text-slate-600">
+        <span className="mr-2 rounded bg-white px-2 py-1 font-semibold text-slate-700 shadow-sm">
+          Shift
+        </span>
+        Keep Shift held while choosing the next item.
+      </div>
+    );
+  }
+
+  if (step.demo === "undo") {
+    return (
+      <div className="rounded-lg bg-slate-100 p-2 text-xs leading-5 text-slate-600">
+        Selection replaced by accident. Use undo or Ctrl/Cmd+Z to restore the
+        previous Selection box.
       </div>
     );
   }
@@ -182,8 +219,14 @@ export function ReaderGuide({
       return;
     }
 
-    setStepIndex(0);
-    onStepChange?.(0);
+    const resetTimer = window.setTimeout(() => {
+      setStepIndex(0);
+      onStepChange?.(0);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(resetTimer);
+    };
   }, [isOpen, onStepChange]);
 
   useEffect(() => {

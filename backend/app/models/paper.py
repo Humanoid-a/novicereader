@@ -7,6 +7,7 @@ class PaperRecord(BaseModel):
     originalFilename: str
     storedFilename: str
     storageKey: str | None = None
+    analysisProfileId: str | None = None
     contentType: str
     sizeBytes: int
     createdAt: str

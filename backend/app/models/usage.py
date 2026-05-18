@@ -4,9 +4,13 @@ from typing import Literal
 
 TokenUsageFeature = Literal[
     "annotation_explanation",
+    "annotation_summary",
     "follow_up_explanation",
     "ask_question",
     "document_chat",
+    "paper_section_summaries",
+    "paper_academic_context",
+    "paper_figure_analyses",
 ]
 
 

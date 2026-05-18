@@ -75,6 +75,7 @@ export type ConversationMessage = {
 
 export type AiExplanationContent = {
   mainExplanation: string;
+  annotationName?: string;
   knowledgePoints: KnowledgePoint[];
   followUpConversation: ConversationMessage[];
   relatedConcepts: string[];
@@ -89,14 +90,30 @@ export type FollowUpExplanationItem = {
   updatedAt: string;
 };
 
+export type AiAnnotationResponseKind = "explanation" | "summary";
+
+export type AiAnnotationVersion = {
+  id: string;
+  prompt: string;
+  response: string;
+  explanation: AiExplanationContent;
+  responseKind?: AiAnnotationResponseKind;
+  targetIds: string[];
+  createdAt: string;
+};
+
 export type AiAnnotation = {
   id: string;
   paperId: string;
   userId: string;
   target: AnnotationTarget;
+  targets?: AnnotationTarget[];
   prompt: string;
   response: string;
   explanation: AiExplanationContent;
+  summary?: AiExplanationContent | null;
+  responseKind?: AiAnnotationResponseKind;
+  versions?: AiAnnotationVersion[];
   createdAt: string;
   isDeleted?: boolean;
   deletedAt?: string | null;

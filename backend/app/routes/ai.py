@@ -8,6 +8,8 @@ from app.models.ai import (
     AskQuestionResponse,
     AiChatRequest,
     AiChatResponse,
+    SummarizeRequest,
+    SummarizeResponse,
 )
 from app.models.chat import QuestionAnswerTurn, QuestionConversation
 from app.models.user import UserProfile
@@ -17,7 +19,9 @@ from app.services.ai_service import (
     call_openai_for_explanation,
     call_openai_for_follow_up_explanation,
     call_openai_for_question,
+    call_openai_for_summary,
     call_openai_chat,
+    format_annotation_context_for_prompt,
 )
 from app.services.annotation_service import upsert_annotation_follow_up_explanation
 from app.services.question_service import (
@@ -46,24 +50,58 @@ def _find_annotation_for_request(request: object, user_id: str):
     return None
 
 
+def _get_annotation_response_content(annotation, response_kind: str | None):
+    if annotation is None:
+        return None
+
+    if response_kind == "summary" and annotation.summary is not None:
+        return annotation.summary
+
+    return annotation.explanation
+
+
 @router.post("/explain", response_model=ExplainResponse)
 def explain_selection(
     request: ExplainRequest,
     current_user: UserProfile = Depends(get_current_user),
 ):
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
     context = build_context_for_selection(
         user_id=current_user.id,
         paper_id=request.paperId,
-        target=request.target,
+        targets=request_targets,
     )
 
     explanation = call_openai_for_explanation(
-        target=request.target,
+        targets=request_targets,
         prompt=request.prompt,
         context=context,
+        knowledge_profile=request.knowledgeProfile,
     )
 
     return ExplainResponse(explanation=explanation)
+
+
+@router.post("/summarize", response_model=SummarizeResponse)
+def summarize_selection(
+    request: SummarizeRequest,
+    current_user: UserProfile = Depends(get_current_user),
+):
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
+    context = build_context_for_selection(
+        user_id=current_user.id,
+        paper_id=request.paperId,
+        targets=request_targets,
+    )
+
+    explanation = call_openai_for_summary(
+        targets=request_targets,
+        prompt=request.prompt,
+        context=context,
+        knowledge_profile=request.knowledgeProfile,
+    )
+
+    return SummarizeResponse(explanation=explanation)
 
 
 @router.post("/explain/follow-up", response_model=FollowUpExplanationResponse)
@@ -71,23 +109,30 @@ def explain_follow_up(
     request: FollowUpExplanationRequest,
     current_user: UserProfile = Depends(get_current_user),
 ):
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
     context = build_context_for_selection(
         user_id=current_user.id,
         paper_id=request.paperId,
-        target=request.target,
+        targets=request_targets,
     )
     annotation = _find_annotation_for_request(request, current_user.id)
+    annotation_content = _get_annotation_response_content(
+        annotation,
+        request.responseKind,
+    )
 
     explanation = call_openai_for_follow_up_explanation(
         target=request.target,
+        targets=request_targets,
         follow_up_point=request.followUpPoint,
         annotation_prompt=request.annotationPrompt,
         annotation_explanation=(
-            annotation.explanation
-            if annotation is not None
+            annotation_content
+            if annotation_content is not None
             else request.annotationExplanation
         ),
         context=context,
+        knowledge_profile=request.knowledgeProfile,
     )
 
     follow_up = upsert_annotation_follow_up_explanation(
@@ -96,6 +141,7 @@ def explain_follow_up(
         annotation_id=request.annotationId,
         prompt=request.followUpPoint,
         response=explanation.mainExplanation,
+        response_kind=request.responseKind,
     )
 
     return FollowUpExplanationResponse(explanation=explanation, followUp=follow_up)
@@ -106,11 +152,12 @@ def ask_question(
     request: AskQuestionRequest,
     current_user: UserProfile = Depends(get_current_user),
 ):
-    if request.target is not None:
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
+    if request_targets:
         context = build_context_for_selection(
             user_id=current_user.id,
             paper_id=request.paperId,
-            target=request.target,
+            targets=request_targets,
         )
     else:
         context = build_context_for_question(
@@ -124,10 +171,9 @@ def ask_question(
         conversation_id=request.conversationId,
     )
     annotation = _find_annotation_for_request(request, current_user.id)
-    annotation_explanation = (
-        annotation.explanation
-        if annotation is not None and annotation.explanation is not None
-        else request.annotationExplanation
+    annotation_explanation = format_annotation_context_for_prompt(
+        annotation,
+        request.annotationExplanation,
     )
 
     answer = call_openai_for_question(
@@ -136,6 +182,7 @@ def ask_question(
         target=request.target,
         annotation_explanation=annotation_explanation,
         previous_turns=previous_conversation.turns if previous_conversation else [],
+        knowledge_profile=request.knowledgeProfile,
     )
 
     turn, conversation = save_question_turn(

@@ -1,4 +1,4 @@
-from fastapi import UploadFile, HTTPException
+from fastapi import BackgroundTasks, UploadFile, HTTPException
 from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
@@ -60,7 +60,34 @@ def raise_user_storage_limit_error() -> None:
     )
 
 
-async def upload_paper_for_user(user_id: str, file: UploadFile) -> PaperWithUrls:
+def generate_paper_analysis_profile_for_upload(user_id: str, paper_id: str) -> None:
+    paper = get_paper_record(user_id, paper_id)
+
+    if paper is None:
+        return
+
+    try:
+        from app.services.paper_analysis_service import (
+            create_paper_analysis_profile_for_paper,
+        )
+
+        profile = create_paper_analysis_profile_for_paper(
+            user_id=user_id,
+            paper=paper,
+        )
+        paper["analysisProfileId"] = profile.id
+        paper["updatedAt"] = now_iso()
+        save_paper_record(paper)
+    except Exception:
+        # Upload already succeeded; paper analysis can be retried later.
+        return
+
+
+async def upload_paper_for_user(
+    user_id: str,
+    file: UploadFile,
+    background_tasks: BackgroundTasks | None = None,
+) -> PaperWithUrls:
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
 
@@ -110,6 +137,7 @@ async def upload_paper_for_user(user_id: str, file: UploadFile) -> PaperWithUrls
         "originalFilename": file.filename or "uploaded.pdf",
         "storedFilename": stored_filename,
         "storageKey": storage_key,
+        "analysisProfileId": None,
         "contentType": file.content_type,
         "sizeBytes": size_bytes,
         "createdAt": timestamp,
@@ -138,6 +166,13 @@ async def upload_paper_for_user(user_id: str, file: UploadFile) -> PaperWithUrls
             ],
         },
     )
+
+    if background_tasks is not None:
+        background_tasks.add_task(
+            generate_paper_analysis_profile_for_upload,
+            user_id,
+            paper_id,
+        )
 
     return PaperWithUrls(**paper_with_urls(paper))
 

@@ -3,6 +3,7 @@ export type PaperRecord = {
   userId: string;
   originalFilename: string;
   storedFilename: string;
+  analysisProfileId?: string | null;
   contentType: string;
   sizeBytes: number;
   createdAt: string;

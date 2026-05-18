@@ -1,11 +1,13 @@
 "use client";
 
 import { AppMenu } from "@/components/AppMenu";
+import { KnowledgeProfilePresetPicker } from "@/components/KnowledgeProfilePresetPicker";
 import {
   useCallback,
   useEffect,
   useRef,
   useState,
+  type FormEvent,
   type MouseEvent,
 } from "react";
 import { createId } from "@/lib/id";
@@ -17,47 +19,137 @@ import RichAiText from "@/components/RichAiText";
 import {
   askAiQuestion,
   createPaperAnnotation,
-  deletePaperAnnotationTarget,
+  deletePaperAnnotation,
   explainFollowUpConcept,
   explainSelection,
   getStoredAuthToken,
   getPaper,
   listPaperAnnotations,
   listPaperConversations,
+  summarizeSelection,
 } from "@/lib/api";
 import {
   askGuestAiQuestion,
   createGuestPaperAnnotation,
-  deleteGuestAnnotationTarget,
+  deleteGuestAnnotation,
   explainGuestFollowUpConcept,
   explainGuestSelection,
   getGuestPaper,
+  getGuestUserProfile,
   isGuestSessionActive,
   listGuestAnnotations,
   listGuestConversations,
+  summarizeGuestSelection,
 } from "@/lib/guestSession";
+import {
+  deleteKnowledgeProfileForAccount,
+  loadKnowledgeProfileRecordsForAccount,
+  saveKnowledgeProfileForAccount,
+  selectKnowledgeProfileForAccount,
+} from "@/lib/knowledgeProfileSync";
+import {
+  DEFAULT_KNOWLEDGE_DESCRIPTION,
+  DEFAULT_KNOWLEDGE_PROFILE,
+  DEFAULT_KNOWLEDGE_PROFILE_NAME,
+  getAccountKnowledgeProfileRecords,
+  getLocalKnowledgeProfileRecord,
+  getUniqueKnowledgeProfileName,
+  type LocalKnowledgeProfileRecord,
+} from "@/lib/knowledgeProfileStore";
 import {
   askLocalAiQuestion,
   createLocalPaperAnnotation,
-  deleteLocalAnnotationTarget,
+  deleteLocalAnnotation,
   explainLocalFollowUpConcept,
   explainLocalSelection,
   getLocalPaper,
   isLocalPaperId,
   listLocalAnnotations,
   listLocalConversations,
+  summarizeLocalSelection,
 } from "@/lib/localLibrary";
 import type { PaperWithUrls } from "@/types/paper";
 import type {
   AiAnnotation,
+  AiAnnotationResponseKind,
+  AiExplanationContent,
   AnnotationTarget,
   RegionAnnotationTarget,
   SelectionTool,
   TextAnnotationTarget,
 } from "@/types/annotation";
 import type { QuestionAnswerTurn, QuestionConversation } from "@/types/questions";
+import type { UserKnowledgeProfile, UserProfile } from "@/types/user";
+import type { KnowledgeProfilePreset } from "@/lib/knowledgeProfilePresets";
 
+type SelectionSnapshot = {
+  targets: AnnotationTarget[];
+  currentSelectionId: string | null;
+  selectedAnnotationId: string | null;
+};
 
+type ReaderProfileForm = {
+  backgroundSummary: string;
+  knownDomainsText: string;
+  weakAreasText: string;
+};
+
+type ReaderProfileDialogMode = "edit" | "new";
+
+function joinProfileList(values: string[]) {
+  return values.join("\n");
+}
+
+function splitProfileList(value: string) {
+  const seen = new Set<string>();
+  const items = value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return items.filter((item) => {
+    const normalized = item.toLowerCase();
+
+    if (seen.has(normalized)) {
+      return false;
+    }
+
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function getReaderProfileForm(
+  profile = DEFAULT_KNOWLEDGE_PROFILE
+): ReaderProfileForm {
+  return {
+    backgroundSummary: profile.assumedFromEmptyOnboarding
+      ? ""
+      : profile.backgroundSummary,
+    knownDomainsText: joinProfileList(profile.knownDomains),
+    weakAreasText: joinProfileList(profile.weakAreas),
+  };
+}
+
+function buildReaderKnowledgeProfile(
+  form: ReaderProfileForm
+): UserKnowledgeProfile {
+  const backgroundSummary = form.backgroundSummary.trim();
+  const knownDomains = splitProfileList(form.knownDomainsText);
+  const weakAreas = splitProfileList(form.weakAreasText);
+  const hasUserProfile =
+    Boolean(backgroundSummary) ||
+    knownDomains.length > 0 ||
+    weakAreas.length > 0;
+
+  return {
+    ...DEFAULT_KNOWLEDGE_PROFILE,
+    assumedFromEmptyOnboarding: !hasUserProfile,
+    backgroundSummary,
+    knownDomains,
+    weakAreas,
+  };
+}
 
 function cleanTextForDisplay(text: string) {
   return text.replace(/\s+/g, " ").trim();
@@ -80,8 +172,59 @@ function shortenTextForDisplay(text: string, maxLength = 180) {
   return `${start} ... ${end}`;
 }
 
-function getAnnotationMainExplanation(annotation: AiAnnotation) {
-  return annotation.explanation?.mainExplanation || annotation.response;
+function isEventTargetInsideElement(
+  target: EventTarget | null,
+  element: HTMLElement | null
+) {
+  return (
+    typeof Node !== "undefined" &&
+    target instanceof Node &&
+    Boolean(element?.contains(target))
+  );
+}
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+  return (
+    typeof HTMLElement !== "undefined" &&
+    target instanceof HTMLElement &&
+    Boolean(target.closest("input, textarea, select, [contenteditable]"))
+  );
+}
+
+function inferResponseKindFromPrompt(prompt: string): AiAnnotationResponseKind {
+  const promptText = prompt.trim().toLowerCase();
+
+  if (
+    promptText.startsWith("summarize") ||
+    promptText.startsWith("summary") ||
+    promptText.includes(" summarize ") ||
+    promptText.includes(" summary ")
+  ) {
+    return "summary";
+  }
+
+  return "explanation";
+}
+
+function inferAnnotationResponseKind(
+  annotation: AiAnnotation | null
+): AiAnnotationResponseKind {
+  if (annotation?.responseKind === "summary") {
+    return "summary";
+  }
+
+  return inferResponseKindFromPrompt(annotation?.prompt ?? "");
+}
+
+function inferAnnotationVersionResponseKind(version: {
+  prompt: string;
+  responseKind?: AiAnnotationResponseKind;
+}) {
+  return version.responseKind ?? inferResponseKindFromPrompt(version.prompt);
+}
+
+function getAiResponseHeading(kind: AiAnnotationResponseKind) {
+  return kind === "summary" ? "Summary" : "Explanation";
 }
 
 function sortAnnotationsNewestFirst(annotations: AiAnnotation[]) {
@@ -89,6 +232,280 @@ function sortAnnotationsNewestFirst(annotations: AiAnnotation[]) {
     (first, second) =>
       new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime()
   );
+}
+
+function getAnnotationTargets(annotation: AiAnnotation): AnnotationTarget[] {
+  return annotation.targets?.length
+    ? annotation.targets
+    : annotation.target
+      ? [annotation.target]
+      : [];
+}
+
+function getLatestAnnotationVersionForKind(
+  annotation: AiAnnotation,
+  kind: AiAnnotationResponseKind
+) {
+  return [...(annotation.versions ?? [])]
+    .sort(
+      (first, second) =>
+        new Date(second.createdAt).getTime() -
+        new Date(first.createdAt).getTime()
+    )
+    .find((version) => inferAnnotationVersionResponseKind(version) === kind);
+}
+
+function getAnnotationResponseContent(
+  annotation: AiAnnotation | null,
+  kind: AiAnnotationResponseKind
+): AiExplanationContent | null {
+  if (!annotation) {
+    return null;
+  }
+
+  if (kind === "summary") {
+    if (annotation.summary?.mainExplanation?.trim()) {
+      return annotation.summary;
+    }
+
+    const summaryVersion = getLatestAnnotationVersionForKind(
+      annotation,
+      "summary"
+    );
+
+    if (summaryVersion) {
+      return summaryVersion.explanation;
+    }
+
+    return inferAnnotationResponseKind(annotation) === "summary"
+      ? annotation.explanation
+      : null;
+  }
+
+  const explanationVersion = getLatestAnnotationVersionForKind(
+    annotation,
+    "explanation"
+  );
+
+  if (explanationVersion) {
+    return explanationVersion.explanation;
+  }
+
+  return inferAnnotationResponseKind(annotation) === "summary"
+    ? null
+    : annotation.explanation;
+}
+
+function getAnnotationMainExplanation(
+  annotation: AiAnnotation,
+  kind: AiAnnotationResponseKind = inferAnnotationResponseKind(annotation)
+) {
+  return (
+    getAnnotationResponseContent(annotation, kind)?.mainExplanation ||
+    annotation.response
+  );
+}
+
+function formatAiResponseContentForConversation(
+  kind: AiAnnotationResponseKind,
+  content: AiExplanationContent
+) {
+  const label = kind === "summary" ? "Summary part" : "Explanation part";
+  const sections: string[] = [];
+  const mainText = content.mainExplanation.trim();
+
+  if (mainText) {
+    sections.push(`${label}:\n${mainText}`);
+  }
+
+  const savedFollowUpsByPrompt = new Map<
+    string,
+    NonNullable<AiExplanationContent["followUpExplanations"]>[number]
+  >();
+
+  for (const followUp of content.followUpExplanations ?? []) {
+    const promptKey = followUp.prompt.trim().toLowerCase();
+
+    if (promptKey) {
+      savedFollowUpsByPrompt.set(promptKey, followUp);
+    }
+  }
+
+  const printedPrompts = new Set<string>();
+  const followUpLines: string[] = [];
+
+  for (const concept of content.relatedConcepts ?? []) {
+    const promptText = concept.trim();
+
+    if (!promptText) {
+      continue;
+    }
+
+    const promptKey = promptText.toLowerCase();
+    printedPrompts.add(promptKey);
+    followUpLines.push(`- Follow-up question: ${promptText}`);
+
+    const savedFollowUp = savedFollowUpsByPrompt.get(promptKey);
+    const savedResponse = savedFollowUp?.response?.trim();
+
+    if (savedResponse) {
+      followUpLines.push(`  Saved follow-up explanation: ${savedResponse}`);
+    }
+  }
+
+  for (const followUp of content.followUpExplanations ?? []) {
+    const promptText = followUp.prompt.trim();
+
+    if (!promptText) {
+      continue;
+    }
+
+    const promptKey = promptText.toLowerCase();
+
+    if (printedPrompts.has(promptKey)) {
+      continue;
+    }
+
+    followUpLines.push(`- Follow-up question: ${promptText}`);
+
+    const savedResponse = followUp.response?.trim();
+
+    if (savedResponse) {
+      followUpLines.push(`  Saved follow-up explanation: ${savedResponse}`);
+    }
+  }
+
+  if (followUpLines.length > 0) {
+    sections.push(`${label} follow-ups:\n${followUpLines.join("\n")}`);
+  }
+
+  return sections.join("\n\n");
+}
+
+function formatAnnotationForConversation(annotation: AiAnnotation) {
+  const sections = (["summary", "explanation"] as AiAnnotationResponseKind[])
+    .map((kind) => {
+      const content = getAnnotationResponseContent(annotation, kind);
+
+      return content?.mainExplanation?.trim()
+        ? formatAiResponseContentForConversation(kind, content)
+        : "";
+    })
+    .filter(Boolean);
+
+  return sections.length > 0 ? sections.join("\n\n") : null;
+}
+
+function getAnnotationPromptForKind(
+  annotation: AiAnnotation,
+  kind: AiAnnotationResponseKind
+) {
+  return (
+    getLatestAnnotationVersionForKind(annotation, kind)?.prompt ||
+    (inferAnnotationResponseKind(annotation) === kind ? annotation.prompt : "") ||
+    annotation.prompt
+  );
+}
+
+function setAnnotationResponseContent(
+  annotation: AiAnnotation,
+  kind: AiAnnotationResponseKind,
+  content: AiExplanationContent
+): AiAnnotation {
+  if (kind === "summary") {
+    return {
+      ...annotation,
+      summary: content,
+    };
+  }
+
+  return {
+    ...annotation,
+    explanation: content,
+  };
+}
+
+function getAnnotationResponseSections(annotation: AiAnnotation | null) {
+  if (!annotation) {
+    return [];
+  }
+
+  return (["summary", "explanation"] as AiAnnotationResponseKind[])
+    .map((kind) => ({
+      kind,
+      title: getAiResponseHeading(kind),
+      content: getAnnotationResponseContent(annotation, kind),
+    }))
+    .filter(
+      (
+        section
+      ): section is {
+        kind: AiAnnotationResponseKind;
+        title: string;
+        content: AiExplanationContent;
+      } => Boolean(section.content?.mainExplanation?.trim())
+    );
+}
+
+function getCollapsedAiResponseSectionsForAnnotation(
+  annotation: AiAnnotation | null
+): Record<AiAnnotationResponseKind, boolean> {
+  void annotation;
+
+  return {
+    summary: false,
+    explanation: false,
+  };
+}
+
+function getFollowUpStateKey(kind: AiAnnotationResponseKind, concept: string) {
+  return `${kind}:${concept}`;
+}
+
+function getPrimaryAnnotationTarget(annotation: AiAnnotation | null) {
+  return annotation ? getAnnotationTargets(annotation)[0] ?? null : null;
+}
+
+function annotationHasTarget(annotation: AiAnnotation, targetId: string) {
+  return getAnnotationTargets(annotation).some((target) => target.id === targetId);
+}
+
+function getTargetDisplayName(target: AnnotationTarget | null) {
+  if (!target) {
+    return "Selected content";
+  }
+
+  if (target.type === "region") {
+    return `Region on page ${target.pageNumber}`;
+  }
+
+  const cleaned = cleanTextForDisplay(target.text);
+
+  return cleaned ? shortenTextForDisplay(cleaned, 54) : "Highlighted text";
+}
+
+function getAnnotationDisplayName(annotation: AiAnnotation | null) {
+  const activeKind = inferAnnotationResponseKind(annotation);
+  const name =
+    getAnnotationResponseContent(annotation, activeKind)
+      ?.annotationName?.trim() ||
+    getAnnotationResponseContent(
+      annotation,
+      activeKind === "summary" ? "explanation" : "summary"
+    )?.annotationName?.trim() ||
+    getAnnotationResponseContent(annotation, "summary")?.annotationName?.trim();
+
+  if (name) {
+    return name;
+  }
+
+  const targets = annotation ? getAnnotationTargets(annotation) : [];
+
+  if (targets.length > 1) {
+    return `${targets.length} selected items`;
+  }
+
+  return getTargetDisplayName(targets[0] ?? null);
 }
 
 function getAnnotationVersionsForTarget(
@@ -100,7 +517,7 @@ function getAnnotationVersionsForTarget(
   }
 
   return sortAnnotationsNewestFirst(
-    annotations.filter((annotation) => annotation.target.id === target.id)
+    annotations.filter((annotation) => annotationHasTarget(annotation, target.id))
   );
 }
 
@@ -109,8 +526,27 @@ function getNewestAnnotationForTargetId(
   targetId: string
 ) {
   return sortAnnotationsNewestFirst(
-    annotations.filter((annotation) => annotation.target.id === targetId)
+    annotations.filter((annotation) => annotationHasTarget(annotation, targetId))
   )[0] ?? null;
+}
+
+function getNewestAnnotationForTargetSet(
+  annotations: AiAnnotation[],
+  targets: AnnotationTarget[]
+) {
+  if (targets.length === 0) {
+    return null;
+  }
+
+  const selectionSignature = getTargetSignature(targets);
+
+  return (
+    sortAnnotationsNewestFirst(annotations).find(
+      (annotation) =>
+        getTargetSignature(getAnnotationTargets(annotation)) ===
+        selectionSignature
+    ) ?? null
+  );
 }
 
 function getNewestAnnotationsByTarget(annotations: AiAnnotation[]) {
@@ -118,20 +554,67 @@ function getNewestAnnotationsByTarget(annotations: AiAnnotation[]) {
   const newestAnnotations: AiAnnotation[] = [];
 
   for (const annotation of sortAnnotationsNewestFirst(annotations)) {
-    if (seenTargetIds.has(annotation.target.id)) {
+    const firstUnseenTarget = getAnnotationTargets(annotation).find(
+      (target) => !seenTargetIds.has(target.id)
+    );
+
+    if (!firstUnseenTarget) {
       continue;
     }
 
-    seenTargetIds.add(annotation.target.id);
+    getAnnotationTargets(annotation).forEach((target) => {
+      seenTargetIds.add(target.id);
+    });
     newestAnnotations.push(annotation);
   }
 
   return newestAnnotations;
 }
 
-function getFollowUpResponse(annotation: AiAnnotation | null, concept: string) {
+function getTargetSignature(targets: AnnotationTarget[]) {
+  return targets.map((target) => target.id).sort().join("|");
+}
+
+function getUniqueTargetsById(targets: AnnotationTarget[]) {
+  const seenTargetIds = new Set<string>();
+  const uniqueTargets: AnnotationTarget[] = [];
+
+  for (const target of targets) {
+    if (seenTargetIds.has(target.id)) {
+      continue;
+    }
+
+    seenTargetIds.add(target.id);
+    uniqueTargets.push(target);
+  }
+
+  return uniqueTargets;
+}
+
+function getAnnotationContainingTargets(
+  annotations: AiAnnotation[],
+  targets: AnnotationTarget[]
+) {
+  const targetIds = targets.map((target) => target.id);
+
+  if (targetIds.length === 0) {
+    return null;
+  }
+
   return (
-    annotation?.explanation.followUpExplanations?.find(
+    sortAnnotationsNewestFirst(annotations).find((annotation) =>
+      targetIds.every((targetId) => annotationHasTarget(annotation, targetId))
+    ) ?? null
+  );
+}
+
+function getFollowUpResponse(
+  annotation: AiAnnotation | null,
+  concept: string,
+  kind: AiAnnotationResponseKind
+) {
+  return (
+    getAnnotationResponseContent(annotation, kind)?.followUpExplanations?.find(
       (followUp) => followUp.prompt === concept
     )?.response ?? ""
   );
@@ -144,11 +627,15 @@ function sortConversationsNewestFirst(conversations: QuestionConversation[]) {
   );
 }
 
-function LoadingDots() {
+function LoadingDots({
+  label = "Generating explanation...",
+}: {
+  label?: string;
+}) {
   return (
     <div className="flex items-center gap-2 text-sm text-slate-500">
       <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900" />
-      <span>Generating explanation...</span>
+      <span>{label}</span>
     </div>
   );
 }
@@ -246,6 +733,9 @@ function buildGuideDemoAnnotation(
     response: mainExplanation,
     explanation: {
       mainExplanation,
+      annotationName: isTextDemo
+        ? "Hidden state reasoning"
+        : "Demo region annotation",
       knowledgePoints: [],
       followUpConversation: [],
       relatedConcepts: isTextDemo
@@ -270,17 +760,28 @@ export default function ReaderPage() {
     top: number;
     visualZoom: number;
   } | null>(null);
+  const selectionPreviewCloseTimeoutRef = useRef<number | null>(null);
+  const multiselectToastTimeoutRef = useRef<number | null>(null);
+  const isShiftMultiselectKeyDownRef = useRef(false);
+  const previewedSelectionTargetIdRef = useRef<string | null>(null);
   const targetRevealNonceRef = useRef(0);
   const readerGuideTimersRef = useRef<number[]>([]);
+  const readerProfileMenuRef = useRef<HTMLDivElement | null>(null);
   const readerGuideSnapshotRef = useRef<{
     selectionTool: SelectionTool;
     rightPanelView: "annotations" | "history";
     currentSelection: AnnotationTarget | null;
+    selectedTargets: AnnotationTarget[];
     selectedAnnotation: AiAnnotation | null;
     selectionExpanded: boolean;
+    selectionHistory: SelectionSnapshot[];
+    selectionFuture: SelectionSnapshot[];
     overlappingTargetIds: string[];
     prompt: string;
+    promptFocused: boolean;
     aiResponse: string;
+    aiResponseKind: AiAnnotationResponseKind;
+    collapsedAiResponseSections: Record<AiAnnotationResponseKind, boolean>;
     activeFollowUpConcept: string;
     expandedFollowUpConcepts: Record<string, boolean>;
     followUpErrors: Record<string, string>;
@@ -292,6 +793,31 @@ export default function ReaderPage() {
   const [paper, setPaper] = useState<PaperWithUrls | null>(null);
   const [isGuestMode, setIsGuestMode] = useState(false);
   const [isLocalPaper, setIsLocalPaper] = useState(false);
+  const [readerProfileRecords, setReaderProfileRecords] = useState<
+    LocalKnowledgeProfileRecord[]
+  >([]);
+  const [selectedReaderProfileId, setSelectedReaderProfileId] =
+    useState<string>("");
+  const [selectedReaderKnowledgeProfile, setSelectedReaderKnowledgeProfile] =
+    useState<UserKnowledgeProfile>(DEFAULT_KNOWLEDGE_PROFILE);
+  const [isReaderProfileMenuOpen, setIsReaderProfileMenuOpen] = useState(false);
+  const [isReaderProfilePresetPickerOpen, setIsReaderProfilePresetPickerOpen] =
+    useState(false);
+  const [readerProfilePresetSearch, setReaderProfilePresetSearch] =
+    useState("");
+  const [readerProfileDialogMode, setReaderProfileDialogMode] =
+    useState<ReaderProfileDialogMode | null>(null);
+  const [readerProfileDialogProfileId, setReaderProfileDialogProfileId] =
+    useState<string | null>(null);
+  const [readerProfileDialogName, setReaderProfileDialogName] =
+    useState(DEFAULT_KNOWLEDGE_PROFILE_NAME);
+  const [readerProfileDialogForm, setReaderProfileDialogForm] =
+    useState<ReaderProfileForm>(() =>
+      getReaderProfileForm(DEFAULT_KNOWLEDGE_PROFILE)
+    );
+  const [readerProfileDialogError, setReaderProfileDialogError] = useState("");
+  const [isSavingReaderProfile, setIsSavingReaderProfile] = useState(false);
+  const [isDeletingReaderProfile, setIsDeletingReaderProfile] = useState(false);
   const [annotations, setAnnotations] = useState<AiAnnotation[]>([]);
   const [pdfCurrentPage, setPdfCurrentPage] = useState(1);
   const [pdfNumPages, setPdfNumPages] = useState(0);
@@ -311,6 +837,13 @@ export default function ReaderPage() {
   >("annotations");
   const [currentSelection, setCurrentSelection] =
     useState<AnnotationTarget | null>(null);
+  const [selectedTargets, setSelectedTargets] = useState<AnnotationTarget[]>([]);
+  const [previewedSelectionTargetId, setPreviewedSelectionTargetId] =
+    useState<string | null>(null);
+  const [isMultiselectToastVisible, setIsMultiselectToastVisible] =
+    useState(false);
+  const [selectionHistory, setSelectionHistory] = useState<SelectionSnapshot[]>([]);
+  const [selectionFuture, setSelectionFuture] = useState<SelectionSnapshot[]>([]);
  const [selectedAnnotation, setSelectedAnnotation] =
   useState<AiAnnotation | null>(null);
 
@@ -326,9 +859,17 @@ const [isDeletingAnnotation, setIsDeletingAnnotation] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [promptFocused, setPromptFocused] = useState(false);
   const [aiResponse, setAiResponse] = useState("");
+  const [aiResponseKind, setAiResponseKind] =
+    useState<AiAnnotationResponseKind>("explanation");
+  const [collapsedAiResponseSections, setCollapsedAiResponseSections] =
+    useState<Record<AiAnnotationResponseKind, boolean>>({
+      explanation: false,
+      summary: false,
+    });
 
   const [isLoading, setIsLoading] = useState(true);
   const [isExplaining, setIsExplaining] = useState(false);
+  const [isSummarizing, setIsSummarizing] = useState(false);
   const [isSavingAnnotation, setIsSavingAnnotation] = useState(false);
   const [isAskingQuestion, setIsAskingQuestion] = useState(false);
   const [questionTurns, setQuestionTurns] = useState<QuestionAnswerTurn[]>([]);
@@ -373,6 +914,64 @@ useEffect(() => {
 useEffect(() => {
   pdfVisualZoomRef.current = pdfVisualZoom;
 }, [pdfVisualZoom]);
+
+useEffect(() => {
+  return () => {
+    if (selectionPreviewCloseTimeoutRef.current !== null) {
+      window.clearTimeout(selectionPreviewCloseTimeoutRef.current);
+    }
+
+    if (multiselectToastTimeoutRef.current !== null) {
+      window.clearTimeout(multiselectToastTimeoutRef.current);
+    }
+  };
+}, []);
+
+useEffect(() => {
+  function showShiftMultiselectToast(event: KeyboardEvent) {
+    if (
+      event.key !== "Shift" ||
+      event.repeat ||
+      isShiftMultiselectKeyDownRef.current ||
+      isEditableShortcutTarget(event.target)
+    ) {
+      return;
+    }
+
+    isShiftMultiselectKeyDownRef.current = true;
+
+    if (multiselectToastTimeoutRef.current !== null) {
+      window.clearTimeout(multiselectToastTimeoutRef.current);
+    }
+
+    setIsMultiselectToastVisible(true);
+
+    multiselectToastTimeoutRef.current = window.setTimeout(() => {
+      multiselectToastTimeoutRef.current = null;
+      setIsMultiselectToastVisible(false);
+    }, 850);
+  }
+
+  function resetShiftMultiselectKey() {
+    isShiftMultiselectKeyDownRef.current = false;
+  }
+
+  function handleShiftMultiselectKeyUp(event: KeyboardEvent) {
+    if (event.key === "Shift") {
+      resetShiftMultiselectKey();
+    }
+  }
+
+  window.addEventListener("keydown", showShiftMultiselectToast);
+  window.addEventListener("keyup", handleShiftMultiselectKeyUp);
+  window.addEventListener("blur", resetShiftMultiselectKey);
+
+  return () => {
+    window.removeEventListener("keydown", showShiftMultiselectToast);
+    window.removeEventListener("keyup", handleShiftMultiselectKeyUp);
+    window.removeEventListener("blur", resetShiftMultiselectKey);
+  };
+}, []);
 
 useEffect(() => {
   if (!paperId) {
@@ -453,6 +1052,84 @@ useEffect(() => {
     window.removeEventListener("beforeunload", warnBeforeLeaving);
   };
 }, [isGuestMode, isLocalPaper, paper]);
+
+useEffect(() => {
+  if (!paper) {
+    return;
+  }
+
+  let isMounted = true;
+  const activePaper = paper;
+  const profileUserId = isGuestMode ? getGuestUserProfile().id : activePaper.userId;
+
+  async function loadReaderProfiles() {
+    const profileOwner = isGuestMode
+      ? getGuestUserProfile()
+      : {
+          id: activePaper.userId,
+          username:
+            activePaper.userId === "local-user" ? "local" : activePaper.userId,
+          displayName: "Local reader",
+        };
+    const profileRecords = await loadKnowledgeProfileRecordsForAccount({
+      user: profileOwner,
+      isGuest: isGuestMode,
+    });
+    const selectedProfileRecord = getLocalKnowledgeProfileRecord({
+      userId: profileUserId,
+      isGuest: isGuestMode,
+    });
+
+    if (!isMounted) {
+      return;
+    }
+
+    setReaderProfileRecords(profileRecords);
+    setSelectedReaderProfileId(selectedProfileRecord?.id ?? "");
+    setSelectedReaderKnowledgeProfile(
+      selectedProfileRecord?.knowledgeProfile ?? DEFAULT_KNOWLEDGE_PROFILE
+    );
+  }
+
+  loadReaderProfiles().catch((error) => {
+    console.error(error);
+  });
+
+  return () => {
+    isMounted = false;
+  };
+}, [paper, isGuestMode]);
+
+useEffect(() => {
+  if (!isReaderProfileMenuOpen) {
+    return;
+  }
+
+  function closeReaderProfileMenuForOutsidePointer(event: PointerEvent) {
+    if (isEventTargetInsideElement(event.target, readerProfileMenuRef.current)) {
+      return;
+    }
+
+    setIsReaderProfileMenuOpen(false);
+  }
+
+  function closeReaderProfileMenuForEscape(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      setIsReaderProfileMenuOpen(false);
+    }
+  }
+
+  window.addEventListener("pointerdown", closeReaderProfileMenuForOutsidePointer);
+  window.addEventListener("keydown", closeReaderProfileMenuForEscape);
+
+  return () => {
+    window.removeEventListener(
+      "pointerdown",
+      closeReaderProfileMenuForOutsidePointer
+    );
+    window.removeEventListener("keydown", closeReaderProfileMenuForEscape);
+  };
+}, [isReaderProfileMenuOpen]);
 
 useEffect(() => {
   const scrollContainer = pdfScrollContainerRef.current;
@@ -639,11 +1316,17 @@ const closeReaderGuide = useCallback(() => {
     setSelectionTool(snapshot.selectionTool);
     setRightPanelView(snapshot.rightPanelView);
     setCurrentSelection(snapshot.currentSelection);
+    setSelectedTargets(snapshot.selectedTargets);
     setSelectedAnnotation(snapshot.selectedAnnotation);
     setSelectionExpanded(snapshot.selectionExpanded);
+    setSelectionHistory(snapshot.selectionHistory);
+    setSelectionFuture(snapshot.selectionFuture);
     setOverlappingTargetIds(snapshot.overlappingTargetIds);
     setPrompt(snapshot.prompt);
+    setPromptFocused(snapshot.promptFocused);
     setAiResponse(snapshot.aiResponse);
+    setAiResponseKind(snapshot.aiResponseKind);
+    setCollapsedAiResponseSections(snapshot.collapsedAiResponseSections);
     setActiveFollowUpConcept(snapshot.activeFollowUpConcept);
     setExpandedFollowUpConcepts(snapshot.expandedFollowUpConcepts);
     setFollowUpErrors(snapshot.followUpErrors);
@@ -655,6 +1338,13 @@ const closeReaderGuide = useCallback(() => {
   readerGuideSnapshotRef.current = null;
   setGuideDemoAnnotation(null);
   setIsGuideToolSwitchAnimating(false);
+  previewedSelectionTargetIdRef.current = null;
+  setPreviewedSelectionTargetId(null);
+  if (multiselectToastTimeoutRef.current !== null) {
+    window.clearTimeout(multiselectToastTimeoutRef.current);
+    multiselectToastTimeoutRef.current = null;
+  }
+  setIsMultiselectToastVisible(false);
   setAnnotationToDelete(null);
   setTargetToReveal(null);
   setIsReaderGuideOpen(false);
@@ -680,38 +1370,41 @@ const handleReaderGuideStepChange = useCallback(
     setPrompt("");
     setPromptFocused(false);
     setIsGuideToolSwitchAnimating(false);
+    setSelectionHistory([]);
+    setSelectionFuture([]);
+    previewedSelectionTargetIdRef.current = null;
+    setPreviewedSelectionTargetId(null);
+    setIsMultiselectToastVisible(false);
 
-    if (stepIndex === 0 || stepIndex === 1) {
-      setSelectionTool("highlight");
-      setGuideDemoAnnotation(null);
-      setCurrentSelection(GUIDE_DEMO_TEXT_TARGET);
-      setSelectedAnnotation(null);
-      setAiResponse("");
-      return;
-    }
+    const setGuideSelection = (
+      targets: AnnotationTarget[],
+      focusedTarget: AnnotationTarget | null,
+      annotation: AiAnnotation | null = null
+    ) => {
+      const resolvedKind = inferAnnotationResponseKind(annotation);
 
-    if (stepIndex === 2) {
-      const demoAnnotation = buildGuideDemoAnnotation(
-        paper,
-        GUIDE_DEMO_TEXT_TARGET,
-        "text"
+      setGuideDemoAnnotation(annotation);
+      setCurrentSelection(focusedTarget);
+      setSelectedTargets(targets);
+      setSelectedAnnotation(annotation);
+      setAiResponseKind(resolvedKind);
+      setCollapsedAiResponseSections(
+        getCollapsedAiResponseSectionsForAnnotation(annotation)
       );
+      setAiResponse(
+        annotation ? getAnnotationMainExplanation(annotation, resolvedKind) : ""
+      );
+    };
 
+    if (stepIndex === 0) {
       setSelectionTool("highlight");
-      setGuideDemoAnnotation(demoAnnotation);
-      setCurrentSelection(demoAnnotation.target);
-      setSelectedAnnotation(demoAnnotation);
-      setAiResponse(demoAnnotation.explanation.mainExplanation);
-      revealGuideDemoTarget(demoAnnotation.target.id);
+      setGuideSelection([GUIDE_DEMO_TEXT_TARGET], GUIDE_DEMO_TEXT_TARGET);
       return;
     }
 
-    if (stepIndex === 3) {
+    if (stepIndex === 1) {
       setSelectionTool("highlight");
-      setGuideDemoAnnotation(null);
-      setCurrentSelection(null);
-      setSelectedAnnotation(null);
-      setAiResponse("");
+      setGuideSelection([GUIDE_DEMO_TEXT_TARGET], GUIDE_DEMO_TEXT_TARGET);
       setIsGuideToolSwitchAnimating(true);
 
       queueReaderGuideTimer(() => {
@@ -719,7 +1412,7 @@ const handleReaderGuideStepChange = useCallback(
       }, 360);
 
       queueReaderGuideTimer(() => {
-        setCurrentSelection(GUIDE_DEMO_REGION_TARGET);
+        setGuideSelection([GUIDE_DEMO_REGION_TARGET], GUIDE_DEMO_REGION_TARGET);
         revealGuideDemoTarget(GUIDE_DEMO_REGION_TARGET.id);
       }, 720);
 
@@ -729,12 +1422,70 @@ const handleReaderGuideStepChange = useCallback(
       return;
     }
 
-    if (stepIndex === 4) {
+    if (stepIndex === 2) {
+      setSelectionTool("highlight");
+      setGuideSelection([GUIDE_DEMO_TEXT_TARGET], GUIDE_DEMO_TEXT_TARGET);
+      return;
+    }
+
+    if (stepIndex === 3) {
+      const demoAnnotation = buildGuideDemoAnnotation(
+        paper,
+        GUIDE_DEMO_REGION_TARGET,
+        "region"
+      );
+
       setSelectionTool("region");
-      setGuideDemoAnnotation(null);
-      setCurrentSelection(null);
-      setSelectedAnnotation(null);
-      setAiResponse("");
+      setGuideSelection(
+        getAnnotationTargets(demoAnnotation),
+        demoAnnotation.target,
+        demoAnnotation
+      );
+      revealGuideDemoTarget(demoAnnotation.target.id);
+      return;
+    }
+
+    if (stepIndex === 4) {
+      const multiTargets = [GUIDE_DEMO_REGION_TARGET, GUIDE_DEMO_TEXT_TARGET];
+
+      setSelectionTool("region");
+      setGuideSelection(multiTargets, GUIDE_DEMO_TEXT_TARGET);
+      setOverlappingTargetIds(multiTargets.map((target) => target.id));
+      if (multiselectToastTimeoutRef.current !== null) {
+        window.clearTimeout(multiselectToastTimeoutRef.current);
+      }
+
+      setIsMultiselectToastVisible(true);
+      multiselectToastTimeoutRef.current = window.setTimeout(() => {
+        multiselectToastTimeoutRef.current = null;
+        setIsMultiselectToastVisible(false);
+      }, 850);
+      revealGuideDemoTarget(GUIDE_DEMO_REGION_TARGET.id);
+      return;
+    }
+
+    if (stepIndex === 5) {
+      const multiTargets = [GUIDE_DEMO_REGION_TARGET, GUIDE_DEMO_TEXT_TARGET];
+
+      setSelectionTool("region");
+      setGuideSelection(multiTargets, GUIDE_DEMO_TEXT_TARGET);
+      setOverlappingTargetIds([GUIDE_DEMO_TEXT_TARGET.id]);
+      previewedSelectionTargetIdRef.current = GUIDE_DEMO_TEXT_TARGET.id;
+      setPreviewedSelectionTargetId(GUIDE_DEMO_TEXT_TARGET.id);
+      return;
+    }
+
+    if (stepIndex === 6) {
+      setSelectionTool("region");
+      setGuideSelection([GUIDE_DEMO_REGION_TARGET], GUIDE_DEMO_REGION_TARGET);
+      setOverlappingTargetIds([GUIDE_DEMO_REGION_TARGET.id]);
+      setSelectionHistory([
+        {
+          targets: [GUIDE_DEMO_REGION_TARGET, GUIDE_DEMO_TEXT_TARGET],
+          currentSelectionId: GUIDE_DEMO_TEXT_TARGET.id,
+          selectedAnnotationId: null,
+        },
+      ]);
       return;
     }
 
@@ -743,13 +1494,18 @@ const handleReaderGuideStepChange = useCallback(
       GUIDE_DEMO_REGION_TARGET,
       "region"
     );
-
     setSelectionTool("region");
-    setGuideDemoAnnotation(demoAnnotation);
-    setCurrentSelection(demoAnnotation.target);
-    setSelectedAnnotation(demoAnnotation);
-    setAiResponse(demoAnnotation.explanation.mainExplanation);
+    setGuideSelection(
+      getAnnotationTargets(demoAnnotation),
+      demoAnnotation.target,
+      demoAnnotation
+    );
     revealGuideDemoTarget(demoAnnotation.target.id);
+
+    if (stepIndex === 7) {
+      setPrompt("Why is this part important?");
+      setPromptFocused(true);
+    }
   },
   [
     clearReaderGuideTimers,
@@ -759,16 +1515,266 @@ const handleReaderGuideStepChange = useCallback(
   ]
 );
 
+function createSelectionSnapshot(
+  targets: AnnotationTarget[] = selectedTargets,
+  focusedTarget: AnnotationTarget | null = currentSelection,
+  annotation: AiAnnotation | null = selectedAnnotation
+): SelectionSnapshot {
+  return {
+    targets,
+    currentSelectionId: focusedTarget?.id ?? null,
+    selectedAnnotationId: annotation?.id ?? null,
+  };
+}
+
+function getSelectionSnapshotSignature(snapshot: SelectionSnapshot) {
+  return [
+    getTargetSignature(snapshot.targets),
+    snapshot.currentSelectionId ?? "",
+    snapshot.selectedAnnotationId ?? "",
+  ].join("::");
+}
+
+function rememberSelectionDisplayChange(
+  nextTargets: AnnotationTarget[],
+  focusedTarget?: AnnotationTarget | null,
+  annotation?: AiAnnotation | null
+) {
+  const nextSnapshot = createSelectionSnapshot(
+    nextTargets,
+    focusedTarget ?? nextTargets[0] ?? null,
+    annotation ?? null
+  );
+  const currentSnapshot = createSelectionSnapshot();
+
+  if (
+    getSelectionSnapshotSignature(currentSnapshot) ===
+    getSelectionSnapshotSignature(nextSnapshot)
+  ) {
+    return;
+  }
+
+  setSelectionFuture([]);
+
+  setSelectionHistory((current) => {
+    const latestHistoryEntry = current[current.length - 1];
+
+    if (
+      latestHistoryEntry &&
+      getSelectionSnapshotSignature(latestHistoryEntry) ===
+        getSelectionSnapshotSignature(currentSnapshot)
+    ) {
+      return current;
+    }
+
+    return [...current, currentSnapshot];
+  });
+}
+
+function setSelectionDisplayWithHistory(
+  nextTargets: AnnotationTarget[],
+  focusedTarget?: AnnotationTarget | null,
+  annotation?: AiAnnotation | null
+) {
+  closeSelectionPreviewNow();
+
+  const nextFocusedTarget =
+    (focusedTarget
+      ? nextTargets.find((target) => target.id === focusedTarget.id)
+      : null) ??
+    nextTargets[0] ??
+    null;
+  const resolvedAnnotation =
+    annotation === undefined
+      ? getNewestAnnotationForTargetSet(annotations, nextTargets)
+      : annotation;
+  const resolvedKind = inferAnnotationResponseKind(resolvedAnnotation);
+
+  rememberSelectionDisplayChange(
+    nextTargets,
+    nextFocusedTarget,
+    resolvedAnnotation
+  );
+  setSelectedTargets(nextTargets);
+  setCurrentSelection(nextFocusedTarget);
+  setSelectedAnnotation(resolvedAnnotation);
+  setAiResponseKind(resolvedKind);
+  setCollapsedAiResponseSections(
+    getCollapsedAiResponseSectionsForAnnotation(resolvedAnnotation)
+  );
+  setSelectionExpanded(false);
+  setOverlappingTargetIds([]);
+  setActiveFollowUpConcept("");
+  setExpandedFollowUpConcepts({});
+  setFollowUpErrors({});
+  setAiResponse(
+    resolvedAnnotation
+      ? getAnnotationMainExplanation(resolvedAnnotation, resolvedKind)
+      : ""
+  );
+  setActiveConversation(null);
+  setQuestionTurns([]);
+}
+
+function restoreSelectionSnapshot(snapshot: SelectionSnapshot) {
+  closeSelectionPreviewNow();
+
+  const focusedTarget =
+    snapshot.targets.find(
+      (target) => target.id === snapshot.currentSelectionId
+    ) ??
+    snapshot.targets[0] ??
+    null;
+  const exactAnnotation = snapshot.selectedAnnotationId
+    ? annotations.find((annotation) => annotation.id === snapshot.selectedAnnotationId) ?? null
+    : null;
+  const exactSelectionAnnotation = getNewestAnnotationForTargetSet(
+    annotations,
+    snapshot.targets
+  );
+  const fallbackAnnotation =
+    !exactAnnotation && !exactSelectionAnnotation && snapshot.selectedAnnotationId && focusedTarget
+      ? getNewestAnnotationForTargetId(annotations, focusedTarget.id)
+      : null;
+  const restoredAnnotation =
+    exactAnnotation ?? exactSelectionAnnotation ?? fallbackAnnotation;
+  const restoredKind = inferAnnotationResponseKind(restoredAnnotation);
+
+  setSelectedTargets(snapshot.targets);
+  setCurrentSelection(focusedTarget);
+  setSelectedAnnotation(restoredAnnotation);
+  setAiResponseKind(restoredKind);
+  setCollapsedAiResponseSections(
+    getCollapsedAiResponseSectionsForAnnotation(restoredAnnotation)
+  );
+  setSelectionExpanded(false);
+  setOverlappingTargetIds(focusedTarget ? [focusedTarget.id] : []);
+  setActiveFollowUpConcept("");
+  setExpandedFollowUpConcepts({});
+  setFollowUpErrors({});
+  setAiResponse(
+    restoredAnnotation
+      ? getAnnotationMainExplanation(restoredAnnotation, restoredKind)
+      : ""
+  );
+  setActiveConversation(null);
+  setQuestionTurns([]);
+}
+
+function revertSelectionChange() {
+  const previousSnapshot = selectionHistory[selectionHistory.length - 1];
+
+  if (!previousSnapshot) {
+    return;
+  }
+
+  const currentSnapshot = createSelectionSnapshot();
+
+  restoreSelectionSnapshot(previousSnapshot);
+  setSelectionHistory((current) => current.slice(0, -1));
+  setSelectionFuture((current) => [...current, currentSnapshot]);
+}
+
+function restoreForwardSelectionChange() {
+  const nextSnapshot = selectionFuture[selectionFuture.length - 1];
+
+  if (!nextSnapshot) {
+    return;
+  }
+
+  const currentSnapshot = createSelectionSnapshot();
+
+  restoreSelectionSnapshot(nextSnapshot);
+  setSelectionFuture((current) => current.slice(0, -1));
+  setSelectionHistory((current) => [...current, currentSnapshot]);
+}
+
+useEffect(() => {
+  function handleSelectionHistoryShortcut(event: KeyboardEvent) {
+    const key = event.key.toLowerCase();
+    const canUndo = key === "z" && selectionHistory.length > 0;
+    const canRedo = key === "y" && selectionFuture.length > 0;
+
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.shiftKey ||
+      !(event.metaKey || event.ctrlKey) ||
+      isEditableShortcutTarget(event.target) ||
+      (!canUndo && !canRedo)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (canUndo) {
+      revertSelectionChange();
+      return;
+    }
+
+    restoreForwardSelectionChange();
+  }
+
+  window.addEventListener("keydown", handleSelectionHistoryShortcut);
+
+  return () => {
+    window.removeEventListener("keydown", handleSelectionHistoryShortcut);
+  };
+}, [selectionHistory, selectionFuture, annotations]);
+
+function selectTargetFromSelectionBox(target: AnnotationTarget) {
+  closeSelectionPreviewNow();
+  const matchingAnnotation =
+    getNewestAnnotationForTargetSet(annotations, selectedTargets) ??
+    (selectedAnnotation &&
+    getTargetSignature(getAnnotationTargets(selectedAnnotation)) ===
+      getTargetSignature(selectedTargets)
+      ? selectedAnnotation
+      : null);
+  const responseKind = inferAnnotationResponseKind(matchingAnnotation);
+
+  rememberSelectionDisplayChange(selectedTargets, target, matchingAnnotation);
+  setCurrentSelection(target);
+  setSelectedAnnotation(matchingAnnotation);
+  setAiResponseKind(responseKind);
+  setAiResponse(
+    matchingAnnotation
+      ? getAnnotationMainExplanation(matchingAnnotation, responseKind)
+      : ""
+  );
+  setOverlappingTargetIds([target.id]);
+}
+
+function removeTargetFromSelectionBox(targetId: string) {
+  const nextTargets = selectedTargets.filter((target) => target.id !== targetId);
+  const nextFocusedTarget =
+    currentSelection && nextTargets.some((target) => target.id === currentSelection.id)
+      ? currentSelection
+      : nextTargets[0] ?? null;
+
+  setSelectionDisplayWithHistory(
+    nextTargets,
+    nextFocusedTarget
+  );
+}
+
 function startReaderGuide() {
   readerGuideSnapshotRef.current = {
     selectionTool,
     rightPanelView,
     currentSelection,
+    selectedTargets,
     selectedAnnotation,
     selectionExpanded,
+    selectionHistory,
+    selectionFuture,
     overlappingTargetIds,
     prompt,
+    promptFocused,
     aiResponse,
+    aiResponseKind,
+    collapsedAiResponseSections,
     activeFollowUpConcept,
     expandedFollowUpConcepts,
     followUpErrors,
@@ -794,18 +1800,9 @@ function requestDeleteSelectedAnnotation() {
 }
 
 function clearSelection() {
-  setCurrentSelection(null);
-  setSelectedAnnotation(null);
+  setSelectionDisplayWithHistory([]);
   setAnnotationToDelete(null);
-  setAiResponse("");
-  setSelectionExpanded(false);
-  setOverlappingTargetIds([]);
-  setActiveFollowUpConcept("");
-  setExpandedFollowUpConcepts({});
-  setFollowUpErrors({});
   setRelatedConversationsExpanded(false);
-  setActiveConversation(null);
-  setQuestionTurns([]);
 }
 
 function clearPendingPdfZoomCommit() {
@@ -848,6 +1845,251 @@ function handleGuestNavigation(event: MouseEvent<HTMLAnchorElement>) {
 
   if (!shouldLeave) {
     event.preventDefault();
+  }
+}
+
+function getReaderProfileUserId() {
+  if (!paper) {
+    return null;
+  }
+
+  return isGuestMode ? getGuestUserProfile().id : paper.userId;
+}
+
+function getReaderProfileOwner(
+  profileRecord?: LocalKnowledgeProfileRecord | null
+): Pick<UserProfile, "id" | "username" | "displayName"> | null {
+  if (!paper) {
+    return null;
+  }
+
+  if (isGuestMode) {
+    return getGuestUserProfile();
+  }
+
+  if (profileRecord) {
+    return {
+      id: profileRecord.userId,
+      username: profileRecord.username,
+      displayName: profileRecord.displayName,
+    };
+  }
+
+  return {
+    id: paper.userId,
+    username: paper.userId === "local-user" ? "local" : paper.userId,
+    displayName: "Local reader",
+  };
+}
+
+async function handleReaderProfileChange(profileId: string) {
+  if (!paper) {
+    return;
+  }
+
+  const profileRecord = readerProfileRecords.find(
+    (record) => record.id === profileId
+  );
+
+  if (!profileRecord) {
+    return;
+  }
+
+  const profileUserId = isGuestMode ? getGuestUserProfile().id : paper.userId;
+
+  try {
+    await selectKnowledgeProfileForAccount({
+      user: {
+        id: profileUserId,
+        username: profileRecord.username,
+        displayName: profileRecord.displayName,
+      },
+      isGuest: isGuestMode,
+      profileId,
+    });
+  } catch (error) {
+    console.error(error);
+    return;
+  }
+
+  setSelectedReaderProfileId(profileRecord.id);
+  setSelectedReaderKnowledgeProfile(profileRecord.knowledgeProfile);
+  setIsReaderProfileMenuOpen(false);
+}
+
+function updateReaderProfileDialogForm<Field extends keyof ReaderProfileForm>(
+  field: Field,
+  value: ReaderProfileForm[Field]
+) {
+  setReaderProfileDialogForm((currentForm) => ({
+    ...currentForm,
+    [field]: value,
+  }));
+  setReaderProfileDialogError("");
+}
+
+function openNewReaderProfileDialog() {
+  setReaderProfilePresetSearch("");
+  setReaderProfileDialogError("");
+  setIsReaderProfilePresetPickerOpen(true);
+  setIsReaderProfileMenuOpen(false);
+}
+
+function closeReaderProfilePresetPicker() {
+  setIsReaderProfilePresetPickerOpen(false);
+  setReaderProfilePresetSearch("");
+}
+
+function chooseReaderProfilePreset(preset: KnowledgeProfilePreset) {
+  const profileUserId = getReaderProfileUserId();
+
+  if (!profileUserId) {
+    return;
+  }
+
+  setReaderProfileDialogMode("new");
+  setReaderProfileDialogProfileId(null);
+  setReaderProfileDialogName(
+    getUniqueKnowledgeProfileName({
+      userId: profileUserId,
+      isGuest: isGuestMode,
+      baseName: preset.defaultName,
+    })
+  );
+  setReaderProfileDialogForm(getReaderProfileForm(preset.knowledgeProfile));
+  setReaderProfileDialogError("");
+  setIsReaderProfilePresetPickerOpen(false);
+  setReaderProfilePresetSearch("");
+  setIsReaderProfileMenuOpen(false);
+}
+
+function openEditReaderProfileDialog() {
+  const selectedProfileRecord =
+    readerProfileRecords.find(
+      (profileRecord) => profileRecord.id === selectedReaderProfileId
+    ) ?? null;
+
+  setReaderProfileDialogMode("edit");
+  setReaderProfileDialogProfileId(selectedProfileRecord?.id ?? null);
+  setReaderProfileDialogName(
+    selectedProfileRecord?.name ?? DEFAULT_KNOWLEDGE_PROFILE_NAME
+  );
+  setReaderProfileDialogForm(
+    getReaderProfileForm(
+      selectedProfileRecord?.knowledgeProfile ?? selectedReaderKnowledgeProfile
+    )
+  );
+  setReaderProfileDialogError("");
+  setIsReaderProfileMenuOpen(false);
+}
+
+function closeReaderProfileDialog() {
+  if (isSavingReaderProfile || isDeletingReaderProfile) {
+    return;
+  }
+
+  setReaderProfileDialogMode(null);
+  setReaderProfileDialogError("");
+}
+
+async function handleDeleteReaderProfile() {
+  const profileId = readerProfileDialogProfileId ?? selectedReaderProfileId;
+  const profileRecord =
+    readerProfileRecords.find((record) => record.id === profileId) ?? null;
+  const profileOwner = getReaderProfileOwner(profileRecord);
+
+  if (!profileId || !profileOwner) {
+    return;
+  }
+
+  const shouldDelete = window.confirm("Delete this profile?");
+
+  if (!shouldDelete) {
+    return;
+  }
+
+  setIsDeletingReaderProfile(true);
+  setReaderProfileDialogError("");
+
+  try {
+    const result = await deleteKnowledgeProfileForAccount({
+      user: profileOwner,
+      isGuest: isGuestMode,
+      profileId,
+    });
+    const selectedRecord = result.selectedRecord ?? result.records[0];
+
+    if (!selectedRecord) {
+      throw new Error("No profile available after delete.");
+    }
+
+    setReaderProfileRecords(result.records);
+    setSelectedReaderProfileId(selectedRecord.id);
+    setSelectedReaderKnowledgeProfile(selectedRecord.knowledgeProfile);
+    setReaderProfileDialogMode(null);
+  } catch (error) {
+    console.error(error);
+    setReaderProfileDialogError(
+      error instanceof Error ? error.message : "Failed to delete profile."
+    );
+  } finally {
+    setIsDeletingReaderProfile(false);
+  }
+}
+
+async function handleReaderProfileDialogSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
+
+  if (!paper || isDeletingReaderProfile) {
+    return;
+  }
+
+  setIsSavingReaderProfile(true);
+  setReaderProfileDialogError("");
+
+  try {
+    const nextProfile = buildReaderKnowledgeProfile(readerProfileDialogForm);
+    let profileOwner: Pick<UserProfile, "id" | "username" | "displayName">;
+
+    if (isGuestMode) {
+      profileOwner = getGuestUserProfile();
+    } else if (!isLocalPaper && getStoredAuthToken()) {
+      profileOwner = {
+        id: paper.userId,
+        username: paper.userId,
+        displayName: paper.userId,
+      };
+    } else {
+      profileOwner = {
+        id: paper.userId,
+        username: paper.userId === "local-user" ? "local" : paper.userId,
+        displayName: "Local reader",
+      };
+    }
+
+    const savedRecord = await saveKnowledgeProfileForAccount({
+      user: profileOwner,
+      isGuest: isGuestMode,
+      knowledgeProfile: nextProfile,
+      profileId: readerProfileDialogProfileId,
+      profileName: readerProfileDialogName,
+    });
+    const updatedRecords = getAccountKnowledgeProfileRecords({
+      userId: profileOwner.id,
+      isGuest: isGuestMode,
+    });
+
+    setReaderProfileRecords(updatedRecords);
+    setSelectedReaderProfileId(savedRecord.id);
+    setSelectedReaderKnowledgeProfile(savedRecord.knowledgeProfile);
+    setReaderProfileDialogMode(null);
+  } catch (error) {
+    console.error(error);
+    setReaderProfileDialogError(
+      error instanceof Error ? error.message : "Failed to save profile."
+    );
+  } finally {
+    setIsSavingReaderProfile(false);
   }
 }
 
@@ -894,16 +2136,66 @@ function restoreHistoryAnnotationPreview() {
   historyHoverScrollPositionRef.current = null;
 }
 
-function revealCurrentSelection() {
-  if (!currentSelection) {
+function clearSelectionPreviewCloseTimer() {
+  if (selectionPreviewCloseTimeoutRef.current === null) {
     return;
   }
 
-  targetRevealNonceRef.current += 1;
-  setTargetToReveal({
-    targetId: currentSelection.id,
-    nonce: targetRevealNonceRef.current,
-  });
+  window.clearTimeout(selectionPreviewCloseTimeoutRef.current);
+  selectionPreviewCloseTimeoutRef.current = null;
+}
+
+function openSelectionPreview(targetId: string) {
+  clearSelectionPreviewCloseTimer();
+
+  if (previewedSelectionTargetIdRef.current === targetId) {
+    return;
+  }
+
+  previewedSelectionTargetIdRef.current = targetId;
+  setPreviewedSelectionTargetId(targetId);
+  previewHistoryAnnotation(targetId);
+}
+
+function closeSelectionPreviewNow() {
+  clearSelectionPreviewCloseTimer();
+
+  if (previewedSelectionTargetIdRef.current === null) {
+    return;
+  }
+
+  previewedSelectionTargetIdRef.current = null;
+  setPreviewedSelectionTargetId(null);
+  restoreHistoryAnnotationPreview();
+}
+
+function scheduleCloseSelectionPreview() {
+  clearSelectionPreviewCloseTimer();
+
+  selectionPreviewCloseTimeoutRef.current = window.setTimeout(() => {
+    selectionPreviewCloseTimeoutRef.current = null;
+
+    if (previewedSelectionTargetIdRef.current === null) {
+      return;
+    }
+
+    previewedSelectionTargetIdRef.current = null;
+    setPreviewedSelectionTargetId(null);
+    restoreHistoryAnnotationPreview();
+  }, 140);
+}
+
+function showMultiselectToast() {
+  if (multiselectToastTimeoutRef.current !== null) {
+    window.clearTimeout(multiselectToastTimeoutRef.current);
+  }
+
+  setIsMultiselectToastVisible(true);
+
+  multiselectToastTimeoutRef.current = window.setTimeout(() => {
+    multiselectToastTimeoutRef.current = null;
+    setIsMultiselectToastVisible(false);
+  }, 850);
 }
 
 async function confirmDeleteAnnotation() {
@@ -911,69 +2203,76 @@ async function confirmDeleteAnnotation() {
     return;
   }
 
-  const deletedTargetId = annotationToDelete.target.id;
-  const targetIdsInSelection =
-    overlappingTargetIds.length > 0 ? overlappingTargetIds : [deletedTargetId];
-  const deletedTargetIndex = targetIdsInSelection.indexOf(deletedTargetId);
-  const remainingTargetIds = targetIdsInSelection.filter(
-    (targetId) => targetId !== deletedTargetId
+  const deletedAnnotationId = annotationToDelete.id;
+  const deletedTargetIds = getAnnotationTargets(annotationToDelete).map(
+    (target) => target.id
   );
-  const replacementTargetIndex =
-    deletedTargetIndex > 0 ? deletedTargetIndex - 1 : 0;
-  const replacementTargetId = remainingTargetIds[replacementTargetIndex];
-  const replacementAnnotation = replacementTargetId
-    ? getNewestAnnotationForTargetId(annotations, replacementTargetId)
-    : null;
+  const replacementAnnotation =
+    sortAnnotationsNewestFirst(
+      annotations.filter(
+        (annotation) =>
+          annotation.id !== deletedAnnotationId &&
+          getAnnotationTargets(annotation).some((target) =>
+            deletedTargetIds.includes(target.id)
+          )
+      )
+    )[0] ?? null;
 
   try {
     setIsDeletingAnnotation(true);
 
     if (isGuestMode) {
-      await deleteGuestAnnotationTarget({
+      await deleteGuestAnnotation({
         paperId: paper.id,
-        targetId: deletedTargetId,
+        annotationId: deletedAnnotationId,
       });
     } else if (isLocalPaper) {
-      await deleteLocalAnnotationTarget({
+      await deleteLocalAnnotation({
         paperId: paper.id,
-        targetId: deletedTargetId,
+        annotationId: deletedAnnotationId,
       });
     } else {
-      await deletePaperAnnotationTarget({
+      await deletePaperAnnotation({
         paperId: paper.id,
-        targetId: deletedTargetId,
+        annotationId: deletedAnnotationId,
       });
     }
 
     setAnnotations((current) =>
-      current.filter(
-        (annotation) => annotation.target.id !== deletedTargetId
-      )
+      current.filter((annotation) => annotation.id !== deletedAnnotationId)
     );
 
-    if (currentSelection?.id === deletedTargetId) {
-      if (replacementAnnotation) {
-        setSelectedAnnotation(replacementAnnotation);
-        setCurrentSelection(replacementAnnotation.target);
-        setAiResponse(getAnnotationMainExplanation(replacementAnnotation));
-        setOverlappingTargetIds(remainingTargetIds);
-        setSelectionExpanded(false);
-        setActiveFollowUpConcept("");
-        setExpandedFollowUpConcepts({});
-        setFollowUpErrors({});
-        setQuestionTurns([]);
-      } else {
-        setSelectedAnnotation(null);
-        setCurrentSelection(null);
-        setAiResponse("");
-        setOverlappingTargetIds([]);
-        setActiveFollowUpConcept("");
-        setExpandedFollowUpConcepts({});
-        setFollowUpErrors({});
-        setQuestionTurns([]);
-      }
+    if (replacementAnnotation) {
+      const replacementTargets = getAnnotationTargets(replacementAnnotation);
+      const replacementKind = inferAnnotationResponseKind(replacementAnnotation);
+
+      setSelectedAnnotation(replacementAnnotation);
+      setSelectedTargets(replacementTargets);
+      setCurrentSelection(getPrimaryAnnotationTarget(replacementAnnotation));
+      setAiResponseKind(replacementKind);
+      setCollapsedAiResponseSections(
+        getCollapsedAiResponseSectionsForAnnotation(replacementAnnotation)
+      );
+      setAiResponse(
+        getAnnotationMainExplanation(replacementAnnotation, replacementKind)
+      );
+      setOverlappingTargetIds(replacementTargets.map((target) => target.id));
+      setSelectionExpanded(false);
+      setActiveFollowUpConcept("");
+      setExpandedFollowUpConcepts({});
+      setFollowUpErrors({});
+      setQuestionTurns([]);
     } else {
-      setOverlappingTargetIds(remainingTargetIds);
+      setSelectedAnnotation(null);
+      setSelectedTargets([]);
+      setCurrentSelection(null);
+      setAiResponseKind("explanation");
+      setAiResponse("");
+      setOverlappingTargetIds([]);
+      setActiveFollowUpConcept("");
+      setExpandedFollowUpConcepts({});
+      setFollowUpErrors({});
+      setQuestionTurns([]);
     }
 
     setAnnotationToDelete(null);
@@ -993,12 +2292,31 @@ function cancelDeleteAnnotation() {
   setAnnotationToDelete(null);
 }
 
-function handleAnnotationClick(annotation: AiAnnotation) {
+function handleAnnotationClick(
+  annotation: AiAnnotation,
+  preferredTarget?: AnnotationTarget | null
+) {
+  closeSelectionPreviewNow();
+
+  const annotationTargets = getAnnotationTargets(annotation);
+  const focusedTarget =
+    preferredTarget && annotationTargets.some((target) => target.id === preferredTarget.id)
+      ? annotationTargets.find((target) => target.id === preferredTarget.id)!
+      : annotationTargets[0] ?? null;
+
+  rememberSelectionDisplayChange(annotationTargets, focusedTarget, annotation);
+  const responseKind = inferAnnotationResponseKind(annotation);
   setRightPanelView("annotations");
-  setCurrentSelection(annotation.target);
+  setCurrentSelection(focusedTarget);
+  setSelectedTargets(annotationTargets);
   setSelectedAnnotation(annotation);
+  setAiResponseKind(responseKind);
+  setCollapsedAiResponseSections(
+    getCollapsedAiResponseSectionsForAnnotation(annotation)
+  );
   setSelectionExpanded(false);
-  setAiResponse(getAnnotationMainExplanation(annotation));
+  setOverlappingTargetIds(focusedTarget ? [focusedTarget.id] : []);
+  setAiResponse(getAnnotationMainExplanation(annotation, responseKind));
   setActiveFollowUpConcept("");
   setExpandedFollowUpConcepts({});
   setFollowUpErrors({});
@@ -1024,8 +2342,11 @@ function handleConversationHistoryClick(conversation: QuestionConversation) {
     null;
 
   if (!linkedSelection) {
+    rememberSelectionDisplayChange([], null, null);
     setCurrentSelection(null);
+    setSelectedTargets([]);
     setSelectedAnnotation(null);
+    setAiResponseKind("explanation");
     setAiResponse("");
     setOverlappingTargetIds([]);
     return;
@@ -1041,14 +2362,27 @@ function handleConversationHistoryClick(conversation: QuestionConversation) {
       annotations,
       linkedSelection.annotationTargetId
     );
+  const linkedKind = inferAnnotationResponseKind(linkedAnnotation);
 
+  rememberSelectionDisplayChange(
+    linkedAnnotation ? getAnnotationTargets(linkedAnnotation) : [linkedSelection.target],
+    linkedSelection.target,
+    linkedAnnotation
+  );
   setCurrentSelection(linkedSelection.target);
+  setSelectedTargets(
+    linkedAnnotation ? getAnnotationTargets(linkedAnnotation) : [linkedSelection.target]
+  );
   setSelectedAnnotation(linkedAnnotation);
+  setAiResponseKind(linkedKind);
+  setCollapsedAiResponseSections(
+    getCollapsedAiResponseSectionsForAnnotation(linkedAnnotation)
+  );
   setSelectionExpanded(false);
   setOverlappingTargetIds([linkedSelection.annotationTargetId]);
   setAiResponse(
     linkedAnnotation
-      ? getAnnotationMainExplanation(linkedAnnotation)
+      ? getAnnotationMainExplanation(linkedAnnotation, linkedKind)
       : linkedSelection.annotationExplanation || ""
   );
 }
@@ -1058,6 +2392,20 @@ function closeActiveConversation() {
   setQuestionTurns([]);
 }
 
+function toggleAiResponseSection(kind: AiAnnotationResponseKind) {
+  setAiResponseKind(kind);
+  const content = getAnnotationResponseContent(selectedAnnotation, kind);
+
+  if (content) {
+    setAiResponse(content.mainExplanation);
+  }
+
+  setCollapsedAiResponseSections((current) => ({
+    ...current,
+    [kind]: !current[kind],
+  }));
+}
+
 function toggleConversationCollapsed(conversationId: string) {
   setCollapsedConversationIds((current) => ({
     ...current,
@@ -1065,86 +2413,401 @@ function toggleConversationCollapsed(conversationId: string) {
   }));
 }
 
-function handleAnnotationContextMenu(hitAnnotations: AiAnnotation[]) {
-  const sortedHitAnnotations = sortAnnotationsNewestFirst(hitAnnotations);
-
-  setOverlappingTargetIds(
-    sortedHitAnnotations.map((annotation) => annotation.target.id)
+function focusOrAppendSelectionTarget(target: AnnotationTarget) {
+  const existingTarget = selectedTargets.find(
+    (selectedTarget) => selectedTarget.id === target.id
   );
 
+  if (existingTarget) {
+    const matchingAnnotation =
+      getNewestAnnotationForTargetSet(annotations, selectedTargets) ??
+      (selectedAnnotation &&
+      getTargetSignature(getAnnotationTargets(selectedAnnotation)) ===
+        getTargetSignature(selectedTargets)
+        ? selectedAnnotation
+        : null);
+    const responseKind = inferAnnotationResponseKind(matchingAnnotation);
+
+    closeSelectionPreviewNow();
+    rememberSelectionDisplayChange(selectedTargets, existingTarget, matchingAnnotation);
+    setRightPanelView("annotations");
+    setCurrentSelection(existingTarget);
+    setSelectedAnnotation(matchingAnnotation);
+    setAiResponseKind(responseKind);
+    setAiResponse(
+      matchingAnnotation
+        ? getAnnotationMainExplanation(matchingAnnotation, responseKind)
+        : ""
+    );
+    setOverlappingTargetIds([existingTarget.id]);
+    return;
+  }
+
+  showMultiselectToast();
+  setSelectionDisplayWithHistory([...selectedTargets, target], target);
+}
+
+function handleAnnotationContextMenu(
+  hitAnnotations: AiAnnotation[],
+  append: boolean
+) {
+  const sortedHitAnnotations = sortAnnotationsNewestFirst(hitAnnotations);
+  const clickedTargets = getUniqueTargetsById(
+    sortedHitAnnotations
+      .map((annotation) => annotation.target)
+      .filter((target): target is AnnotationTarget => Boolean(target))
+  );
+  const clickedTarget = clickedTargets[0] ?? null;
+
+  if (!clickedTarget) {
+    return;
+  }
+
+  setRightPanelView("annotations");
+  setOverlappingTargetIds(clickedTargets.map((target) => target.id));
+
+  if (clickedTargets.length > 1) {
+    const sharedAnnotation =
+      selectedAnnotation &&
+      clickedTargets.every((target) =>
+        annotationHasTarget(selectedAnnotation, target.id)
+      )
+        ? selectedAnnotation
+        : getAnnotationContainingTargets(sortedHitAnnotations, clickedTargets);
+
+    if (sharedAnnotation) {
+      handleAnnotationClick(sharedAnnotation, clickedTarget);
+      setOverlappingTargetIds(clickedTargets.map((target) => target.id));
+      return;
+    }
+
+    const nextTargets = append
+      ? getUniqueTargetsById([...selectedTargets, ...clickedTargets])
+      : clickedTargets;
+
+    showMultiselectToast();
+    setSelectionDisplayWithHistory(nextTargets, clickedTarget);
+    setOverlappingTargetIds(clickedTargets.map((target) => target.id));
+    return;
+  }
+
+  if (append) {
+    focusOrAppendSelectionTarget(clickedTarget);
+    return;
+  }
+
+  if (currentSelection?.id === clickedTarget.id && selectedAnnotation) {
+    return;
+  }
+
+  if (selectedAnnotation && annotationHasTarget(selectedAnnotation, clickedTarget.id)) {
+    const selectedAnnotationTargets = getAnnotationTargets(selectedAnnotation);
+    const focusedTarget =
+      selectedAnnotationTargets.find((target) => target.id === clickedTarget.id) ??
+      clickedTarget;
+
+    rememberSelectionDisplayChange(
+      selectedAnnotationTargets,
+      focusedTarget,
+      selectedAnnotation
+    );
+    setCurrentSelection(focusedTarget);
+    setSelectedTargets(selectedAnnotationTargets);
+    setSelectedAnnotation(selectedAnnotation);
+    const responseKind = inferAnnotationResponseKind(selectedAnnotation);
+    setAiResponseKind(responseKind);
+    setAiResponse(getAnnotationMainExplanation(selectedAnnotation, responseKind));
+    return;
+  }
+
   if (sortedHitAnnotations[0]) {
-    handleAnnotationClick(sortedHitAnnotations[0]);
+    handleAnnotationClick(sortedHitAnnotations[0], clickedTarget);
   }
 }
 
-function handleTextSelected(target: TextAnnotationTarget) {
+function handleSelectionContextMenu(targets: AnnotationTarget[], append: boolean) {
+  const clickedTargets = getUniqueTargetsById(targets);
+  const target = clickedTargets[0] ?? null;
+
+  if (!target) {
+    return;
+  }
+
+  setRightPanelView("annotations");
+  setOverlappingTargetIds(clickedTargets.map((clickedTarget) => clickedTarget.id));
+
+  if (clickedTargets.length > 1) {
+    const sharedAnnotation =
+      selectedAnnotation &&
+      clickedTargets.every((clickedTarget) =>
+        annotationHasTarget(selectedAnnotation, clickedTarget.id)
+      )
+        ? selectedAnnotation
+        : getAnnotationContainingTargets(annotations, clickedTargets);
+
+    if (sharedAnnotation) {
+      handleAnnotationClick(sharedAnnotation, target);
+      setOverlappingTargetIds(
+        clickedTargets.map((clickedTarget) => clickedTarget.id)
+      );
+      return;
+    }
+
+    const nextTargets = append
+      ? getUniqueTargetsById([...selectedTargets, ...clickedTargets])
+      : clickedTargets;
+
+    showMultiselectToast();
+    setSelectionDisplayWithHistory(nextTargets, target);
+    setOverlappingTargetIds(
+      clickedTargets.map((clickedTarget) => clickedTarget.id)
+    );
+    return;
+  }
+
+  if (append) {
+    focusOrAppendSelectionTarget(target);
+    return;
+  }
+
+  const nextTargets = selectedTargets.length > 0 ? selectedTargets : [target];
+  const exactSelectionAnnotation = getNewestAnnotationForTargetSet(
+    annotations,
+    nextTargets
+  );
+  const annotationForCurrentSelection =
+    exactSelectionAnnotation ??
+    (selectedAnnotation &&
+    getTargetSignature(getAnnotationTargets(selectedAnnotation)) ===
+      getTargetSignature(nextTargets) &&
+    annotationHasTarget(selectedAnnotation, target.id)
+      ? selectedAnnotation
+      : null);
+
+  if (currentSelection?.id === target.id) {
+    if (annotationForCurrentSelection) {
+      const responseKind = inferAnnotationResponseKind(annotationForCurrentSelection);
+
+      setSelectedAnnotation(annotationForCurrentSelection);
+      setAiResponseKind(responseKind);
+      setAiResponse(
+        getAnnotationMainExplanation(annotationForCurrentSelection, responseKind)
+      );
+    }
+    return;
+  }
+
+  rememberSelectionDisplayChange(
+    nextTargets,
+    target,
+    annotationForCurrentSelection
+  );
   setCurrentSelection(target);
-  setSelectedAnnotation(null);
-  setAiResponse("");
-  setSelectionExpanded(false);
-  setOverlappingTargetIds([]);
-  setActiveFollowUpConcept("");
-  setExpandedFollowUpConcepts({});
-  setActiveConversation(null);
-  setQuestionTurns([]);
+  setSelectedAnnotation(annotationForCurrentSelection);
+
+  if (annotationForCurrentSelection) {
+    const responseKind = inferAnnotationResponseKind(annotationForCurrentSelection);
+
+    setAiResponseKind(responseKind);
+    setAiResponse(
+      getAnnotationMainExplanation(annotationForCurrentSelection, responseKind)
+    );
+  } else {
+    setAiResponseKind("explanation");
+    setAiResponse("");
+  }
 }
 
-
-  function handleRegionSelected(region: RegionAnnotationTarget) {
-    setCurrentSelection(region);
-    setSelectedAnnotation(null);
-    setSelectionExpanded(false);
-    setOverlappingTargetIds([]);
-    setActiveFollowUpConcept("");
-    setExpandedFollowUpConcepts({});
-    setAiResponse("");
-    setActiveConversation(null);
-    setQuestionTurns([]);
+function handleTextSelected(target: TextAnnotationTarget, append: boolean) {
+  if (append) {
+    showMultiselectToast();
   }
 
-async function handleExplainSelection() {
-  if (!currentSelection || !paper) {
+  setSelectionDisplayWithHistory(
+    append
+      ? [
+          ...selectedTargets.filter(
+            (selectedTarget) => selectedTarget.id !== target.id
+          ),
+          target,
+        ]
+      : [target],
+    target
+  );
+}
+
+function handleRegionSelected(region: RegionAnnotationTarget, append: boolean) {
+  if (append) {
+    showMultiselectToast();
+  }
+
+  setSelectionDisplayWithHistory(
+    append
+      ? [
+          ...selectedTargets.filter((target) => target.id !== region.id),
+          region,
+        ]
+      : [region],
+    region
+  );
+}
+
+async function handleSelectionAiRequest(kind: "explain" | "summarize") {
+  const activeTargets = selectedTargets.length > 0
+    ? selectedTargets
+    : currentSelection
+      ? [currentSelection]
+      : [];
+
+  if (activeTargets.length === 0 || !paper) {
     setAiResponse("Select text or a region from the PDF first.");
     return;
   }
 
-  const explanationPrompt =
-    prompt.trim() || "Explain this selection for a beginner.";
+  const isSummary = kind === "summarize";
+  const requestPrompt =
+    prompt.trim() ||
+    (isSummary
+      ? "Summarize this selection for me."
+      : "Explain this selection for a beginner.");
+  const responseKind: AiAnnotationResponseKind = isSummary
+    ? "summary"
+    : "explanation";
+  const selectionSignature = getTargetSignature(activeTargets);
+  const matchingAnnotation =
+    selectedAnnotation &&
+    getTargetSignature(getAnnotationTargets(selectedAnnotation)) ===
+      selectionSignature
+      ? selectedAnnotation
+      : sortAnnotationsNewestFirst(annotations).find(
+          (annotation) =>
+            getTargetSignature(getAnnotationTargets(annotation)) ===
+              selectionSignature
+        ) ?? null;
+  const hasExistingAnnotationContent =
+    getAnnotationResponseSections(matchingAnnotation).length > 0;
 
   try {
-    setIsExplaining(true);
+    if (isSummary) {
+      setIsSummarizing(true);
+    } else {
+      setIsExplaining(true);
+    }
+
     setActiveFollowUpConcept("");
-    setAiResponse("");
+    setAiResponseKind(responseKind);
+    if (matchingAnnotation) {
+      setSelectedAnnotation(matchingAnnotation);
+      setSelectedTargets(getAnnotationTargets(matchingAnnotation));
+      setCurrentSelection(getPrimaryAnnotationTarget(matchingAnnotation));
+      setCollapsedAiResponseSections(
+        getCollapsedAiResponseSectionsForAnnotation(matchingAnnotation)
+      );
+    } else {
+      setCollapsedAiResponseSections((current) => ({
+        ...current,
+        [responseKind]: false,
+      }));
+    }
+    if (!hasExistingAnnotationContent) {
+      setAiResponse("");
+    }
 
     const result = isGuestMode
-      ? await explainGuestSelection({
-          paperId: paper.id,
-          target: currentSelection,
-          prompt: explanationPrompt,
-        })
-      : isLocalPaper
-        ? await explainLocalSelection({
-            target: currentSelection,
-            prompt: explanationPrompt,
-          })
-        : await explainSelection({
+      ? isSummary
+        ? await summarizeGuestSelection({
             paperId: paper.id,
-            target: currentSelection,
-            prompt: explanationPrompt,
-          });
+            targets: activeTargets,
+            prompt: requestPrompt,
+            knowledgeProfile: selectedReaderKnowledgeProfile,
+          })
+        : await explainGuestSelection({
+            paperId: paper.id,
+            targets: activeTargets,
+            prompt: requestPrompt,
+            knowledgeProfile: selectedReaderKnowledgeProfile,
+          })
+      : isLocalPaper
+        ? isSummary
+          ? await summarizeLocalSelection({
+              targets: activeTargets,
+              prompt: requestPrompt,
+            })
+          : await explainLocalSelection({
+              targets: activeTargets,
+              prompt: requestPrompt,
+            })
+        : isSummary
+          ? await summarizeSelection({
+              paperId: paper.id,
+              targets: activeTargets,
+              prompt: requestPrompt,
+              knowledgeProfile: selectedReaderKnowledgeProfile,
+            })
+          : await explainSelection({
+              paperId: paper.id,
+              targets: activeTargets,
+              prompt: requestPrompt,
+              knowledgeProfile: selectedReaderKnowledgeProfile,
+            });
 
-setAiResponse(result.explanation.mainExplanation);
+    setAiResponse(result.explanation.mainExplanation);
 
-    const annotation: AiAnnotation = {
-  id: createId(),
-  paperId: paper.id,
-  userId: paper.userId,
-  target: currentSelection,
-  prompt: explanationPrompt,
-  response: result.explanation.mainExplanation,
-  explanation: result.explanation,
-  createdAt: new Date().toISOString(),
-};
+    const timestamp = new Date().toISOString();
+    const version = {
+      id: createId(),
+      prompt: requestPrompt,
+      response: result.explanation.mainExplanation,
+      explanation: result.explanation,
+      responseKind,
+      targetIds: activeTargets.map((target) => target.id),
+      createdAt: timestamp,
+    };
+    const preservedExplanation = matchingAnnotation
+      ? getAnnotationResponseContent(matchingAnnotation, "explanation")
+      : null;
+    const preservedSummary = matchingAnnotation
+      ? getAnnotationResponseContent(matchingAnnotation, "summary")
+      : null;
+    const annotationBase: AiAnnotation = matchingAnnotation
+      ? {
+          ...matchingAnnotation,
+          target: activeTargets[0],
+          targets: activeTargets,
+          prompt: requestPrompt,
+          response: result.explanation.mainExplanation,
+          explanation:
+            responseKind === "explanation"
+              ? result.explanation
+              : preservedExplanation ??
+                matchingAnnotation.explanation ??
+                result.explanation,
+          summary:
+            responseKind === "summary"
+              ? result.explanation
+              : preservedSummary ?? matchingAnnotation.summary ?? null,
+          responseKind,
+          versions: [...(matchingAnnotation.versions ?? []), version],
+        }
+      : {
+          id: createId(),
+          paperId: paper.id,
+          userId: paper.userId,
+          target: activeTargets[0],
+          targets: activeTargets,
+          prompt: requestPrompt,
+          response: result.explanation.mainExplanation,
+          explanation: result.explanation,
+          summary: responseKind === "summary" ? result.explanation : null,
+          responseKind,
+          versions: [version],
+          createdAt: timestamp,
+        };
+    const annotation = setAnnotationResponseContent(
+      annotationBase,
+      responseKind,
+      result.explanation
+    );
 
     try {
       setIsSavingAnnotation(true);
@@ -1155,48 +2818,89 @@ setAiResponse(result.explanation.mainExplanation);
           ? await createLocalPaperAnnotation(paper.id, annotation)
           : await createPaperAnnotation(paper.id, annotation);
 
-setAnnotations((current) => [savedAnnotation, ...current]);
-setSelectedAnnotation(savedAnnotation);
+      setAnnotations((current) => {
+        const exists = current.some((stored) => stored.id === savedAnnotation.id);
+
+        return exists
+          ? current.map((stored) =>
+              stored.id === savedAnnotation.id ? savedAnnotation : stored
+            )
+          : [savedAnnotation, ...current];
+      });
+      setSelectedAnnotation(savedAnnotation);
+      setSelectedTargets(getAnnotationTargets(savedAnnotation));
+      setCurrentSelection(getPrimaryAnnotationTarget(savedAnnotation));
+      setCollapsedAiResponseSections(
+        getCollapsedAiResponseSectionsForAnnotation(savedAnnotation)
+      );
     } catch (error) {
       console.error(error);
       setAiResponse(
-  result.explanation.mainExplanation +
-    "\n\nWarning: explanation worked, but saving failed."
-);
+        result.explanation.mainExplanation +
+          `\n\nWarning: ${isSummary ? "summary" : "explanation"} worked, but saving failed.`
+      );
     } finally {
       setIsSavingAnnotation(false);
     }
   } catch (error) {
     console.error(error);
     setAiResponse(
-      "Failed to get explanation. Make sure the backend is running and try again."
+      `Failed to get ${isSummary ? "summary" : "explanation"}. Make sure the backend is running and try again.`
     );
   } finally {
-    setIsExplaining(false);
+    if (isSummary) {
+      setIsSummarizing(false);
+    } else {
+      setIsExplaining(false);
+    }
   }
 }
 
-async function handleExplainRelatedConcept(concept: string) {
+async function handleExplainSelection() {
+  await handleSelectionAiRequest("explain");
+}
+
+async function handleSummarizeSelection() {
+  await handleSelectionAiRequest("summarize");
+}
+
+async function handleExplainRelatedConcept(
+  concept: string,
+  kind: AiAnnotationResponseKind
+) {
   if (!paper || !selectedAnnotation) {
     return;
   }
 
-  if (getFollowUpResponse(selectedAnnotation, concept)) {
+  const followUpKey = getFollowUpStateKey(kind, concept);
+  const activeResponseContent = getAnnotationResponseContent(
+    selectedAnnotation,
+    kind
+  );
+  setAiResponseKind(kind);
+
+  if (activeResponseContent) {
+    setAiResponse(activeResponseContent.mainExplanation);
+  }
+
+  if (getFollowUpResponse(selectedAnnotation, concept, kind)) {
     setExpandedFollowUpConcepts((current) => ({
       ...current,
-      [concept]: !current[concept],
+      [followUpKey]: !current[followUpKey],
     }));
     return;
   }
 
-  const previousExplanation = getAnnotationMainExplanation(selectedAnnotation);
+  const previousExplanation =
+    activeResponseContent?.mainExplanation ??
+    getAnnotationMainExplanation(selectedAnnotation, kind);
 
   try {
-    setActiveFollowUpConcept(concept);
+    setActiveFollowUpConcept(followUpKey);
 
     setFollowUpErrors((current) => {
       const next = { ...current };
-      delete next[concept];
+      delete next[followUpKey];
       return next;
     });
 
@@ -1204,38 +2908,53 @@ async function handleExplainRelatedConcept(concept: string) {
       ? await explainGuestFollowUpConcept({
           paperId: paper.id,
           annotationId: selectedAnnotation.id,
-          target: selectedAnnotation.target,
-          annotationPrompt: selectedAnnotation.prompt,
+          targets: getAnnotationTargets(selectedAnnotation),
+          annotationPrompt: getAnnotationPromptForKind(
+            selectedAnnotation,
+            kind
+          ),
           annotationExplanation: previousExplanation,
           followUpPoint: concept,
+          responseKind: kind,
+          knowledgeProfile: selectedReaderKnowledgeProfile,
         })
       : isLocalPaper
         ? await explainLocalFollowUpConcept({
             paperId: paper.id,
             annotationId: selectedAnnotation.id,
             followUpPoint: concept,
+            responseKind: kind,
           })
         : await explainFollowUpConcept({
             paperId: paper.id,
             annotationId: selectedAnnotation.id,
-            target: selectedAnnotation.target,
-            annotationPrompt: selectedAnnotation.prompt,
+            targets: getAnnotationTargets(selectedAnnotation),
+            annotationPrompt: getAnnotationPromptForKind(
+              selectedAnnotation,
+              kind
+            ),
             annotationExplanation: previousExplanation,
             followUpPoint: concept,
+            responseKind: kind,
+            knowledgeProfile: selectedReaderKnowledgeProfile,
           });
 
-    const updatedAnnotation: AiAnnotation = {
-      ...selectedAnnotation,
-      explanation: {
-        ...selectedAnnotation.explanation,
+    const currentContent =
+      getAnnotationResponseContent(selectedAnnotation, kind) ??
+      selectedAnnotation.explanation;
+    const updatedAnnotation = setAnnotationResponseContent(
+      selectedAnnotation,
+      kind,
+      {
+        ...currentContent,
         followUpExplanations: [
-          ...(selectedAnnotation.explanation.followUpExplanations ?? []).filter(
+          ...(currentContent.followUpExplanations ?? []).filter(
             (followUp) => followUp.id !== result.followUp.id
           ),
           result.followUp,
         ],
-      },
-    };
+      }
+    );
 
     setSelectedAnnotation(updatedAnnotation);
     setAnnotations((current) =>
@@ -1245,24 +2964,24 @@ async function handleExplainRelatedConcept(concept: string) {
     );
     setExpandedFollowUpConcepts((current) => ({
       ...current,
-      [concept]: true,
+      [followUpKey]: true,
     }));
   } catch (error) {
     console.error(error);
     setFollowUpErrors((current) => ({
       ...current,
-      [concept]: "Failed to explain this follow-up point. Please try again.",
+      [followUpKey]: "Failed to explain this follow-up point. Please try again.",
     }));
     setExpandedFollowUpConcepts((current) => ({
       ...current,
-      [concept]: true,
+      [followUpKey]: true,
     }));
   } finally {
     setActiveFollowUpConcept("");
   }
 }
 
- async function handleAskAi() {
+async function handleAskAi() {
   if (!paper) {
     return;
   }
@@ -1274,6 +2993,10 @@ async function handleExplainRelatedConcept(concept: string) {
     return;
   }
 
+  const annotationContext = selectedAnnotation
+    ? formatAnnotationForConversation(selectedAnnotation)
+    : null;
+
   try {
     setIsAskingQuestion(true);
 
@@ -1283,9 +3006,10 @@ async function handleExplainRelatedConcept(concept: string) {
       conversationId: activeConversation?.id ?? null,
       annotationId: selectedAnnotation?.id ?? null,
       target: currentSelection,
-      annotationExplanation: selectedAnnotation
-        ? getAnnotationMainExplanation(selectedAnnotation)
-        : null,
+      targets: selectedTargets.length > 0 ? selectedTargets : undefined,
+      annotationExplanation: annotationContext,
+      responseKind: aiResponseKind,
+      knowledgeProfile: selectedReaderKnowledgeProfile,
     };
     const result = isGuestMode
       ? await askGuestAiQuestion(askQuestionParams)
@@ -1333,9 +3057,7 @@ async function handleExplainRelatedConcept(concept: string) {
               annotationId: selectedAnnotation?.id ?? null,
               annotationTargetId: currentSelection.id,
               target: currentSelection,
-              annotationExplanation: selectedAnnotation
-                ? getAnnotationMainExplanation(selectedAnnotation)
-                : null,
+              annotationExplanation: annotationContext,
             }
           : null,
         createdAt: new Date().toISOString(),
@@ -1350,16 +3072,6 @@ async function handleExplainRelatedConcept(concept: string) {
     annotations,
     currentSelection
   );
-  const overlappingTargetAnnotations = overlappingTargetIds
-    .map((targetId) => getNewestAnnotationForTargetId(annotations, targetId))
-    .filter((annotation): annotation is AiAnnotation => Boolean(annotation));
-  const selectedOverlappingTargetIndex = selectedAnnotation
-    ? overlappingTargetAnnotations.findIndex(
-        (annotation) => annotation.target.id === selectedAnnotation.target.id
-      )
-    : -1;
-  const currentOverlappingTargetIndex =
-    selectedOverlappingTargetIndex >= 0 ? selectedOverlappingTargetIndex : 0;
   const selectedAnnotationVersionIndex = selectedAnnotation
     ? selectedAnnotationVersions.findIndex(
         (annotation) => annotation.id === selectedAnnotation.id
@@ -1367,25 +3079,69 @@ async function handleExplainRelatedConcept(concept: string) {
     : -1;
   const currentAnnotationVersionIndex =
     selectedAnnotationVersionIndex >= 0 ? selectedAnnotationVersionIndex : 0;
-  const relatedConcepts = selectedAnnotation?.explanation.relatedConcepts ?? [];
+  const aiResponseSections = getAnnotationResponseSections(selectedAnnotation);
+  const activeAiResponseContent = getAnnotationResponseContent(
+    selectedAnnotation,
+    aiResponseKind
+  );
+  const isSelectionAiBusy = isExplaining || isSummarizing;
+  const generatingResponseKind: AiAnnotationResponseKind | null = isSummarizing
+    ? "summary"
+    : isExplaining
+      ? "explanation"
+      : null;
+  const aiResponseHeading = getAiResponseHeading(aiResponseKind);
+  const pendingAiResponseSection =
+    generatingResponseKind &&
+    !aiResponseSections.some((section) => section.kind === generatingResponseKind)
+      ? {
+          kind: generatingResponseKind,
+          title: getAiResponseHeading(generatingResponseKind),
+          content: null as AiExplanationContent | null,
+        }
+      : null;
+  const displayedAiResponseSections = [
+    ...aiResponseSections,
+    ...(pendingAiResponseSection ? [pendingAiResponseSection] : []),
+  ].sort((first, second) => {
+    const order: Record<AiAnnotationResponseKind, number> = {
+      summary: 0,
+      explanation: 1,
+    };
+
+    return order[first.kind] - order[second.kind];
+  });
   const hasQuestionTurns = questionTurns.length > 0;
-  const hasAiPanelContent = Boolean(aiResponse) || hasQuestionTurns || isAskingQuestion;
+  const shouldShowTransientAiResponse =
+    Boolean(aiResponse) &&
+    !isSelectionAiBusy &&
+    (displayedAiResponseSections.length === 0 ||
+      !activeAiResponseContent ||
+      aiResponse !== activeAiResponseContent.mainExplanation);
+  const hasAiPanelContent =
+    shouldShowTransientAiResponse ||
+    displayedAiResponseSections.length > 0 ||
+    hasQuestionTurns ||
+    isAskingQuestion;
   const historyAnnotations = getNewestAnnotationsByTarget(annotations);
   const historyConversations = sortConversationsNewestFirst(allConversations);
   const visibleAnnotations = guideDemoAnnotation
     ? [
         guideDemoAnnotation,
         ...annotations.filter(
-          (annotation) => annotation.target.id !== guideDemoAnnotation.target.id
+          (annotation) => !annotationHasTarget(annotation, guideDemoAnnotation.target.id)
         ),
       ]
     : annotations;
   const relatedConversations =
-    currentSelection
+    selectedTargets.length > 0
       ? historyConversations.filter((conversation) =>
           conversation.turns.some(
             (turn) =>
-              turn.linkedSelection?.annotationTargetId === currentSelection.id
+              selectedTargets.some(
+                (target) =>
+                  turn.linkedSelection?.annotationTargetId === target.id
+              )
           )
         )
       : [];
@@ -1397,6 +3153,19 @@ async function handleExplainRelatedConcept(concept: string) {
     []
   );
   const shouldExpandPrompt = promptFocused || prompt.length > 0;
+  const selectedReaderProfileRecord =
+    readerProfileRecords.find(
+      (profileRecord) => profileRecord.id === selectedReaderProfileId
+    ) ?? null;
+  const readerProfileToolbarName =
+    selectedReaderProfileRecord?.name ?? DEFAULT_KNOWLEDGE_PROFILE_NAME;
+  const previewedSelectionTargetIndex = selectedTargets.findIndex(
+    (target) => target.id === previewedSelectionTargetId
+  );
+  const previewedSelectionTarget =
+    previewedSelectionTargetIndex >= 0
+      ? selectedTargets[previewedSelectionTargetIndex]
+      : null;
 
   if (isLoading) {
     return (
@@ -1477,6 +3246,142 @@ async function handleExplainRelatedConcept(concept: string) {
         </div>
 
         <div className="flex justify-self-end items-center gap-2">
+          <div ref={readerProfileMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setIsReaderProfileMenuOpen((isOpen) => !isOpen)}
+              className="flex h-8 min-w-40 max-w-52 items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              aria-expanded={isReaderProfileMenuOpen}
+              aria-haspopup="listbox"
+            >
+              <span className="hidden font-medium lg:inline">Profile</span>
+              <span className="min-w-0 flex-1 truncate text-left font-semibold text-slate-800">
+                {readerProfileToolbarName}
+              </span>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 20 20"
+                className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition ${
+                  isReaderProfileMenuOpen ? "rotate-180 text-slate-700" : ""
+                }`}
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+
+            {isReaderProfileMenuOpen && (
+              <div className="absolute right-0 top-full z-40 mt-2 w-60 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl ring-1 ring-slate-950/5">
+                <div className="border-b border-slate-100 bg-slate-50 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Active profile
+                  </p>
+                  <p className="mt-0.5 truncate text-sm font-semibold text-slate-900">
+                    {readerProfileToolbarName}
+                  </p>
+                </div>
+
+                <div
+                  role="listbox"
+                  aria-label="Knowledge profiles"
+                  className="max-h-44 overflow-auto p-1.5"
+                >
+                  {readerProfileRecords.length > 0 ? (
+                    readerProfileRecords.map((profileRecord) => {
+                      const isActive =
+                        selectedReaderProfileId === profileRecord.id;
+
+                      return (
+                        <button
+                          key={profileRecord.id}
+                          type="button"
+                          role="option"
+                          aria-selected={isActive}
+                          onClick={() => handleReaderProfileChange(profileRecord.id)}
+                          className={`group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition ${
+                            isActive
+                              ? "bg-slate-900 text-white shadow-sm"
+                              : "text-slate-700 hover:bg-slate-100 hover:text-slate-950"
+                          }`}
+                        >
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              isActive
+                                ? "bg-emerald-300"
+                                : "bg-slate-300 group-hover:bg-slate-500"
+                            }`}
+                          />
+                          <span className="min-w-0 flex-1 truncate font-medium">
+                            {profileRecord.name}
+                          </span>
+                          {isActive && (
+                            <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">
+                              On
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="px-2.5 py-3 text-sm text-slate-500">
+                      No saved profiles yet.
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-1 border-t border-slate-100 bg-slate-50 p-1.5">
+                  <button
+                    type="button"
+                    onClick={openEditReaderProfileDialog}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
+                    title="Edit profile"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.8"
+                    >
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                    <span>Edit</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={openNewReaderProfileDialog}
+                    className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-950 hover:shadow-sm"
+                    title="New"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.8"
+                    >
+                      <path d="M12 5v14" />
+                      <path d="M5 12h14" />
+                    </svg>
+                    <span>New</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             onClick={startReaderGuide}
@@ -1509,6 +3414,19 @@ async function handleExplainRelatedConcept(concept: string) {
         </div>
       </header>
 
+      <div
+        role="status"
+        aria-live="polite"
+        aria-hidden={!isMultiselectToastVisible}
+        className={`pointer-events-none fixed left-1/2 top-[72px] z-[130] -translate-x-1/2 rounded-lg bg-slate-950/85 px-4 py-2 text-sm font-semibold text-white shadow-lg ring-1 ring-white/10 backdrop-blur transition-all duration-200 ${
+          isMultiselectToastVisible
+            ? "translate-y-0 opacity-100"
+            : "-translate-y-1 opacity-0"
+        }`}
+      >
+        multiselect
+      </div>
+
       <div className="relative grid h-[calc(100vh-49px)] grid-cols-[minmax(0,1fr)_305px] gap-3 p-3">
        <section
          ref={pdfScrollContainerRef}
@@ -1523,10 +3441,12 @@ async function handleExplainRelatedConcept(concept: string) {
   visualZoom={pdfVisualZoom}
   targetToReveal={targetToReveal}
   currentSelection={currentSelection}
+  currentSelectionTargets={selectedTargets}
   onPageStatusChange={handlePdfPageStatusChange}
   onTextSelected={handleTextSelected}
   onRegionSelected={handleRegionSelected}
   onAnnotationContextMenu={handleAnnotationContextMenu}
+  onSelectionContextMenu={handleSelectionContextMenu}
   onAnnotationContextMenuEmpty={clearSelection}
 />
         </section>
@@ -1602,7 +3522,7 @@ async function handleExplainRelatedConcept(concept: string) {
           </div>
         </div>
 
-        <aside className="flex min-h-0 w-[305px] flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
+        <aside className="relative z-30 flex min-h-0 w-[305px] flex-col overflow-visible rounded-2xl bg-white shadow-sm">
          <div className="border-b p-2">
   <div className="grid grid-cols-2 rounded-lg bg-slate-100 p-0.5 text-xs">
               <button
@@ -1631,7 +3551,7 @@ async function handleExplainRelatedConcept(concept: string) {
 
           {rightPanelView === "annotations" ? (
             <>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-2">
+          <div className="flex min-h-0 flex-1 flex-col overflow-visible p-2">
             <section>
              <div className="mb-2 flex items-center justify-between gap-2">
   <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1639,96 +3559,52 @@ async function handleExplainRelatedConcept(concept: string) {
   </h2>
 
   <div data-guide="selection-actions" className="flex items-center gap-2">
-    {overlappingTargetAnnotations.length > 1 && (
-      <div className="flex items-center gap-1 text-[11px] text-slate-400">
+    {(selectionHistory.length > 0 || selectionFuture.length > 0) && (
+      <>
         <button
-          onClick={() => {
-            const previousAnnotation =
-              overlappingTargetAnnotations[currentOverlappingTargetIndex - 1];
-
-            if (previousAnnotation) {
-              handleAnnotationClick(previousAnnotation);
-            }
-          }}
-          disabled={currentOverlappingTargetIndex <= 0}
-          className="rounded px-1 py-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-25"
-          aria-label="Previous selected annotation"
+          onClick={revertSelectionChange}
+          disabled={selectionHistory.length === 0}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-30"
+          title="Undo selection (Ctrl/Cmd+Z)"
+          aria-label="Undo selection"
         >
-          {"<"}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+          >
+            <path d="M9 7H5v4" />
+            <path d="M5 7l5.5 5.5a5 5 0 1 0 1.5-8.1" />
+          </svg>
         </button>
 
-        <span className="min-w-8 text-center tabular-nums text-slate-500">
-          {currentOverlappingTargetIndex + 1}/{overlappingTargetAnnotations.length}
-        </span>
-
         <button
-          onClick={() => {
-            const nextAnnotation =
-              overlappingTargetAnnotations[currentOverlappingTargetIndex + 1];
-
-            if (nextAnnotation) {
-              handleAnnotationClick(nextAnnotation);
-            }
-          }}
-          disabled={
-            currentOverlappingTargetIndex >=
-            overlappingTargetAnnotations.length - 1
-          }
-          className="rounded px-1 py-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-25"
-          aria-label="Next selected annotation"
+          onClick={restoreForwardSelectionChange}
+          disabled={selectionFuture.length === 0}
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-30"
+          title="Redo selection (Ctrl/Cmd+Y)"
+          aria-label="Redo selection"
         >
-          {">"}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+          >
+            <path d="M15 7h4v4" />
+            <path d="M19 7l-5.5 5.5A5 5 0 1 1 12 4.4" />
+          </svg>
         </button>
-      </div>
-    )}
-
-    {currentSelection && (
-      <button
-        onClick={revealCurrentSelection}
-        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-        title="Jump to selection in PDF"
-        aria-label="Jump to selection in PDF"
-      >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          className="h-3.5 w-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        >
-          <path d="M12 21s7-5.2 7-11a7 7 0 0 0-14 0c0 5.8 7 11 7 11z" />
-          <circle cx="12" cy="10" r="2.5" />
-        </svg>
-      </button>
-    )}
-
-    {selectedAnnotation && (
-      <button
-        onClick={requestDeleteSelectedAnnotation}
-        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-        title="Delete annotation"
-        aria-label="Delete annotation"
-      >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          className="h-3.5 w-3.5"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="2"
-        >
-          <path d="M3 6h18" />
-          <path d="M8 6V4h8v2" />
-          <path d="M19 6l-1 14H6L5 6" />
-          <path d="M10 11v5" />
-          <path d="M14 11v5" />
-        </svg>
-      </button>
+      </>
     )}
 
     {currentSelection && (
@@ -1742,198 +3618,487 @@ async function handleExplainRelatedConcept(concept: string) {
       </button>
     )}
 
-    {currentSelection?.type === "text" &&
-      currentSelection.text.length > 260 && (
-        <button
-          onClick={() => setSelectionExpanded((current) => !current)}
-          className="text-xs font-medium text-slate-500 hover:text-slate-900"
-        >
-          {selectionExpanded ? "Collapse" : "Expand"}
-        </button>
-      )}
   </div>
 </div>
 
               <div
   data-guide="selection-preview"
-  className={`rounded-lg bg-slate-100 p-2 text-xs leading-5 text-slate-700 ${
-    selectionExpanded ? "max-h-40" : "max-h-20"
-  } overflow-auto`}
+  className="relative rounded-lg bg-slate-100 p-2 text-xs leading-5 text-slate-700"
 >
-                {currentSelection?.type === "text" &&
-  (selectionExpanded
-    ? cleanTextForDisplay(currentSelection.text)
-    : shortenTextForDisplay(currentSelection.text))}
+                {selectedTargets.length > 0 && (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {selectedTargets.map((target, index) => {
+                      return (
+                      <div
+                        key={target.id}
+                        role="button"
+                        tabIndex={0}
+                        onMouseEnter={() => openSelectionPreview(target.id)}
+                        onMouseLeave={scheduleCloseSelectionPreview}
+                        onFocus={() => openSelectionPreview(target.id)}
+                        onBlur={(event) => {
+                          if (
+                            isEventTargetInsideElement(
+                              event.relatedTarget,
+                              event.currentTarget
+                            )
+                          ) {
+                            return;
+                          }
 
-                {currentSelection?.type === "region" && (
-                  <div className="space-y-2">
-                    <p className="text-xs">Region selected on page {currentSelection.pageNumber}.</p>
+                          scheduleCloseSelectionPreview();
+                        }}
+                        onClick={() => selectTargetFromSelectionBox(target)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            selectTargetFromSelectionBox(target);
+                          }
+                        }}
+                        className="group relative overflow-visible text-left"
+                      >
+                        <div
+                          className={`relative h-14 overflow-hidden rounded-md border bg-white transition ${
+                            currentSelection?.id === target.id ||
+                            previewedSelectionTargetId === target.id
+                              ? "border-sky-500 ring-1 ring-sky-300"
+                              : "border-slate-200 hover:border-slate-300"
+                          } ${
+                            previewedSelectionTargetId === target.id
+                              ? "shadow-sm"
+                              : ""
+                          }`}
+                        >
+                          <span className="absolute left-1 top-1 z-10 rounded bg-white/85 px-1 text-[9px] font-semibold leading-4 text-slate-500 shadow-sm">
+                            {index + 1}
+                          </span>
 
-                    {currentSelection.imageDataUrl && (
+                          {target.type === "text" ? (
+                            <span className="block h-full overflow-hidden px-1.5 pb-1 pt-5 text-[9px] leading-3 text-slate-500">
+                              {shortenTextForDisplay(target.text)}
+                            </span>
+                          ) : target.imageDataUrl ? (
+                            <img
+                              src={target.imageDataUrl}
+                              alt="Selected PDF region"
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <span className="flex h-full items-center justify-center px-1 text-center text-[9px] leading-3 text-slate-500">
+                              Page {target.pageNumber}
+                            </span>
+                          )}
+
+                          <button
+                          type="button"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            removeTargetFromSelectionBox(target.id);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              removeTargetFromSelectionBox(target.id);
+                            }
+                          }}
+                          className="absolute right-0.5 top-0.5 z-20 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-900/85 text-white shadow-sm transition hover:bg-slate-700 group-hover:flex group-focus-within:flex"
+                          aria-label="Remove selection"
+                        >
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 16 16"
+                            className="h-3 w-3"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeWidth="1.8"
+                          >
+                            <path d="M4.5 4.5l7 7" />
+                            <path d="M11.5 4.5l-7 7" />
+                          </svg>
+                        </button>
+                        </div>
+
+                      </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {previewedSelectionTarget && (
+                  <div
+                    onMouseEnter={() =>
+                      openSelectionPreview(previewedSelectionTarget.id)
+                    }
+                    onMouseLeave={scheduleCloseSelectionPreview}
+                    onClick={(event) => event.stopPropagation()}
+                    onWheel={(event) => event.stopPropagation()}
+                    className="fixed right-[329px] top-24 z-[120] max-h-[min(32rem,calc(100vh-7rem))] w-80 overflow-y-auto rounded-lg border border-slate-200 bg-white p-3 text-left text-xs leading-5 text-slate-700 shadow-xl"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase text-slate-400">
+                      <span>Selection {previewedSelectionTargetIndex + 1}</span>
+                      <span>
+                        {previewedSelectionTarget.type === "region"
+                          ? `Page ${previewedSelectionTarget.pageNumber}`
+                          : `${previewedSelectionTarget.chunks.length} mark${
+                              previewedSelectionTarget.chunks.length === 1
+                                ? ""
+                                : "s"
+                            }`}
+                      </span>
+                    </div>
+
+                    {previewedSelectionTarget.type === "text" ? (
+                      <p className="text-sm leading-6 text-slate-700">
+                        {cleanTextForDisplay(previewedSelectionTarget.text)}
+                      </p>
+                    ) : previewedSelectionTarget.imageDataUrl ? (
                       <img
-                        src={currentSelection.imageDataUrl}
-                        alt="Selected PDF region"
-                        className="max-h-20 rounded-md border bg-white"
-                        />
+                        src={previewedSelectionTarget.imageDataUrl}
+                        alt="Selected PDF region preview"
+                        className="max-h-72 w-full rounded-md border border-slate-200 bg-white object-contain"
+                      />
+                    ) : (
+                      <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+                        Region on page {previewedSelectionTarget.pageNumber}
+                      </p>
                     )}
                   </div>
                 )}
 
-                {!currentSelection &&
+                {selectedTargets.length === 0 &&
                   (selectionTool === "highlight"
                     ? "No text selected yet."
                     : "No region selected yet.")}
               </div>
 
-            <button
-  data-guide="explain-selection"
-  onClick={handleExplainSelection}
-  disabled={!currentSelection || isExplaining || isSavingAnnotation}
-  className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
->
-  {isExplaining
-    ? "Explaining..."
-    : isSavingAnnotation
-      ? "Saving..."
-      : "Explain selection"}
-</button>
+            <div
+              data-guide="ai-request-buttons"
+              className="mt-2 grid grid-cols-2 gap-2"
+            >
+              <button
+                data-guide="explain-selection"
+                onClick={handleExplainSelection}
+                disabled={
+                  selectedTargets.length === 0 ||
+                  isSelectionAiBusy ||
+                  isSavingAnnotation
+                }
+                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isExplaining
+                  ? "Explaining..."
+                  : isSavingAnnotation
+                    ? "Saving..."
+                    : "Explain"}
+              </button>
+
+              <button
+                onClick={handleSummarizeSelection}
+                disabled={
+                  selectedTargets.length === 0 ||
+                  isSelectionAiBusy ||
+                  isSavingAnnotation
+                }
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isSummarizing
+                  ? "Summarizing..."
+                  : isSavingAnnotation
+                    ? "Saving..."
+                    : "Summary"}
+              </button>
+            </div>
             </section>
 
             <section className="mt-3 flex min-h-0 flex-1 flex-col">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold">AI response</h2>
+              <div className="mb-2 flex min-w-0 items-center gap-2">
+                <h2 className="shrink-0 text-sm font-semibold">AI response</h2>
 
-                <div className="flex min-w-0 items-center gap-2">
-                  {selectedAnnotationVersions.length > 1 && (
-                    <div className="flex items-center gap-1 text-[11px] text-slate-400">
-                      <button
-                        onClick={() => {
-                          const previousAnnotation =
-                            selectedAnnotationVersions[
-                              currentAnnotationVersionIndex - 1
-                            ];
+                {selectedAnnotationVersions.length > 1 && (
+                  <div className="flex min-w-0 flex-1 items-center gap-1 rounded-md border border-slate-200 bg-white px-1 py-0.5">
+                    <button
+                      onClick={() => {
+                        const previousAnnotation =
+                          selectedAnnotationVersions[
+                            currentAnnotationVersionIndex - 1
+                          ];
 
-                          if (previousAnnotation) {
-                            handleAnnotationClick(previousAnnotation);
-                          }
-                        }}
-                        disabled={currentAnnotationVersionIndex <= 0}
-                        className="rounded px-1 py-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-25"
-                        aria-label="Previous explanation version"
-                      >
-                        {"<"}
-                      </button>
-
-                      <span className="min-w-8 text-center tabular-nums text-slate-500">
-                        {currentAnnotationVersionIndex + 1}/
-                        {selectedAnnotationVersions.length}
-                      </span>
-
-                      <button
-                        onClick={() => {
-                          const nextAnnotation =
-                            selectedAnnotationVersions[
-                              currentAnnotationVersionIndex + 1
-                            ];
-
-                          if (nextAnnotation) {
-                            handleAnnotationClick(nextAnnotation);
-                          }
-                        }}
-                        disabled={
-                          currentAnnotationVersionIndex >=
-                          selectedAnnotationVersions.length - 1
+                        if (previousAnnotation) {
+                          handleAnnotationClick(previousAnnotation, currentSelection);
                         }
-                        className="rounded px-1 py-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:pointer-events-none disabled:opacity-25"
-                        aria-label="Next explanation version"
+                      }}
+                      disabled={currentAnnotationVersionIndex <= 0}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30"
+                      title={
+                        selectedAnnotationVersions[currentAnnotationVersionIndex - 1]
+                          ? getAnnotationDisplayName(
+                              selectedAnnotationVersions[
+                                currentAnnotationVersionIndex - 1
+                              ]
+                            )
+                          : "Previous annotation"
+                      }
+                      aria-label="Previous annotation"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.8"
                       >
-                        {">"}
-                      </button>
-                    </div>
-                  )}
+                        <path d="M15 6l-6 6 6 6" />
+                      </svg>
+                    </button>
 
-                  <span className="whitespace-nowrap text-xs text-slate-400">
-                    {annotations.length} saved
+                    <div className="min-w-0 flex-1 overflow-x-auto py-0.5">
+                      <div className="flex min-w-max gap-0.5">
+                        {selectedAnnotationVersions.map((annotation, index) => {
+                          const isActive = selectedAnnotation?.id === annotation.id;
+
+                          return (
+                            <button
+                              key={annotation.id}
+                              onClick={() =>
+                                handleAnnotationClick(annotation, currentSelection)
+                              }
+                              aria-pressed={isActive}
+                              className={`flex h-5 min-w-5 items-center justify-center rounded px-1 text-[10px] font-medium tabular-nums transition ${
+                                isActive
+                                  ? "bg-slate-900 text-white shadow-sm"
+                                  : "bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+                              }`}
+                              title={getAnnotationDisplayName(annotation)}
+                              aria-label={getAnnotationDisplayName(annotation)}
+                            >
+                              {index + 1}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const nextAnnotation =
+                          selectedAnnotationVersions[
+                            currentAnnotationVersionIndex + 1
+                          ];
+
+                        if (nextAnnotation) {
+                          handleAnnotationClick(nextAnnotation, currentSelection);
+                        }
+                      }}
+                      disabled={
+                        currentAnnotationVersionIndex >=
+                        selectedAnnotationVersions.length - 1
+                      }
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:pointer-events-none disabled:opacity-30"
+                      title={
+                        selectedAnnotationVersions[currentAnnotationVersionIndex + 1]
+                          ? getAnnotationDisplayName(
+                              selectedAnnotationVersions[
+                                currentAnnotationVersionIndex + 1
+                              ]
+                            )
+                          : "Next annotation"
+                      }
+                      aria-label="Next annotation"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.8"
+                      >
+                        <path d="M9 6l6 6-6 6" />
+                      </svg>
+                    </button>
+                  <span className="shrink-0 px-1 text-[10px] tabular-nums text-slate-400">
+                    {currentAnnotationVersionIndex + 1}/
+                    {selectedAnnotationVersions.length}
                   </span>
-                </div>
+                  </div>
+                )}
+
+                {selectedAnnotation && (
+                  <button
+                    data-guide="delete-annotation"
+                    onClick={requestDeleteSelectedAnnotation}
+                    className="ml-auto inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                    title="Delete annotation"
+                    aria-label="Delete annotation"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v5" />
+                      <path d="M14 11v5" />
+                    </svg>
+                  </button>
+                )}
               </div>
 
               <div
                 data-guide="ai-response"
                 className="min-h-0 flex-1 overflow-auto rounded-lg bg-slate-100 p-3 text-sm leading-6 text-slate-700"
               >
-  {isExplaining ? (
-    <LoadingDots />
-  ) : hasAiPanelContent ? (
+  {hasAiPanelContent ? (
     <div className="space-y-3">
-      {aiResponse && (
-        <section>
-          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Explanation
-          </h3>
+      {displayedAiResponseSections.map((section) => {
+        const isCollapsed = collapsedAiResponseSections[section.kind];
+        const isGeneratingSection = generatingResponseKind === section.kind;
+        const sectionConcepts = section.content?.relatedConcepts ?? [];
 
-          <RichAiText text={aiResponse} />
-        </section>
-      )}
+        return (
+          <section key={section.kind}>
+            <button
+              type="button"
+              onClick={() => toggleAiResponseSection(section.kind)}
+              className="mb-1 flex w-full items-center justify-between rounded-md px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+              aria-expanded={!isCollapsed}
+            >
+              <span>{section.title}</span>
+              <span className="text-slate-400">
+                {isCollapsed ? "+" : "−"}
+              </span>
+            </button>
 
-      {relatedConcepts.length > 0 && (
-        <section>
-          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Explore
-          </h3>
+            {!isCollapsed && (
+              <div className="space-y-3">
+                {isGeneratingSection && (
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <LoadingDots
+                      label={`Generating ${section.title.toLowerCase()}...`}
+                    />
+                  </div>
+                )}
 
-          <div className="flex flex-wrap gap-1.5">
-            {relatedConcepts.map((concept) => (
-              <div key={concept} className="w-full">
-                <button
-                  onClick={() => handleExplainRelatedConcept(concept)}
-                  disabled={Boolean(activeFollowUpConcept)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-xs leading-4 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                    <span className="flex items-center justify-between gap-2">
-                      <span>{concept}</span>
-                      <span className="shrink-0 text-slate-400">
-                      {activeFollowUpConcept === concept ? (
-                        <span className="block h-3 w-3 animate-spin rounded-full border border-slate-300 border-t-slate-700" />
-                      ) : expandedFollowUpConcepts[concept] ? (
-                        "−"
-                      ) : (
-                        "+"
-                      )}
-                    </span>
-                  </span>
-                </button>
+                {section.content && (
+                  <RichAiText text={section.content.mainExplanation} />
+                )}
 
-                {expandedFollowUpConcepts[concept] &&
-                  (getFollowUpResponse(selectedAnnotation, concept) ||
-                    followUpErrors[concept]) && (
-                    <div className="mt-1 rounded-lg border-l-2 border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">
-                      <div className="flex items-start justify-between gap-2">
-                        <RichAiText
-                          text={
-                            getFollowUpResponse(selectedAnnotation, concept) ||
-                            followUpErrors[concept]
-                          }
-                        />
+                {sectionConcepts.length > 0 && (
+                  <div>
+                    <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Explore
+                    </h3>
 
-                        <button
-                          onClick={() =>
-                            setExpandedFollowUpConcepts((current) => ({
-                              ...current,
-                              [concept]: false,
-                            }))
-                          }
-                          className="shrink-0 rounded px-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                          aria-label="Close follow-up explanation"
-                        >
-                          ×
-                        </button>
-                      </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {sectionConcepts.map((concept) => {
+                        const followUpKey = getFollowUpStateKey(
+                          section.kind,
+                          concept
+                        );
+                        const savedFollowUpResponse = getFollowUpResponse(
+                          selectedAnnotation,
+                          concept,
+                          section.kind
+                        );
+                        const followUpError = followUpErrors[followUpKey];
+
+                        return (
+                          <div key={followUpKey} className="w-full">
+                            <button
+                              onClick={() =>
+                                handleExplainRelatedConcept(
+                                  concept,
+                                  section.kind
+                                )
+                              }
+                              disabled={Boolean(activeFollowUpConcept)}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-xs leading-4 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <span className="flex items-center justify-between gap-2">
+                                <span>{concept}</span>
+                                <span className="shrink-0 text-slate-400">
+                                  {activeFollowUpConcept === followUpKey ? (
+                                    <span className="block h-3 w-3 animate-spin rounded-full border border-slate-300 border-t-slate-700" />
+                                  ) : expandedFollowUpConcepts[followUpKey] ? (
+                                    "−"
+                                  ) : (
+                                    "+"
+                                  )}
+                                </span>
+                              </span>
+                            </button>
+
+                            {expandedFollowUpConcepts[followUpKey] &&
+                              (savedFollowUpResponse || followUpError) && (
+                                <div className="mt-1 rounded-lg border-l-2 border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <RichAiText
+                                      text={
+                                        savedFollowUpResponse || followUpError
+                                      }
+                                    />
+
+                                    <button
+                                      onClick={() =>
+                                        setExpandedFollowUpConcepts(
+                                          (current) => ({
+                                            ...current,
+                                            [followUpKey]: false,
+                                          })
+                                        )
+                                      }
+                                      className="shrink-0 rounded px-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                      aria-label="Close follow-up explanation"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  )}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
+            )}
+          </section>
+        );
+      })}
+
+      {shouldShowTransientAiResponse && (
+        <section>
+          <button
+            type="button"
+            onClick={() => toggleAiResponseSection(aiResponseKind)}
+            className="mb-1 flex w-full items-center justify-between rounded-md px-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+            aria-expanded={!collapsedAiResponseSections[aiResponseKind]}
+          >
+            <span>{aiResponseHeading}</span>
+            <span className="text-slate-400">
+              {collapsedAiResponseSections[aiResponseKind] ? "+" : "−"}
+            </span>
+          </button>
+
+          {!collapsedAiResponseSections[aiResponseKind] && (
+            <RichAiText text={aiResponse} />
+          )}
         </section>
       )}
 
@@ -2071,8 +4236,24 @@ async function handleExplainRelatedConcept(concept: string) {
             </section>
           </div>
 
-          <div data-guide="ask-ai-panel" className="border-t bg-white p-2">
-            {activeConversation ? (
+          <div
+            data-guide="ask-ai-panel"
+            className="border-t bg-white p-2"
+            onFocusCapture={() => setPromptFocused(true)}
+            onBlurCapture={(event) => {
+              const nextFocusedElement = event.relatedTarget;
+
+              if (
+                nextFocusedElement instanceof Node &&
+                event.currentTarget.contains(nextFocusedElement)
+              ) {
+                return;
+              }
+
+              setPromptFocused(false);
+            }}
+          >
+            {shouldExpandPrompt && activeConversation ? (
               <div className="mb-2 rounded-lg border-l-2 border-slate-300 bg-slate-50 px-2 py-1.5 text-xs text-slate-500">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="font-medium text-slate-600">
@@ -2096,7 +4277,7 @@ async function handleExplainRelatedConcept(concept: string) {
                   )}
                 </p>
               </div>
-            ) : currentSelection ? (
+            ) : shouldExpandPrompt && currentSelection ? (
               <div className="mb-2 rounded-lg border-l-2 border-slate-300 bg-slate-50 px-2 py-1.5 text-xs text-slate-500">
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="font-medium text-slate-600">
@@ -2105,7 +4286,7 @@ async function handleExplainRelatedConcept(concept: string) {
                   <div className="flex items-center gap-1">
                     {selectedAnnotation && (
                       <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-400">
-                        explanation included
+                        annotation included
                       </span>
                     )}
                     <button
@@ -2119,7 +4300,11 @@ async function handleExplainRelatedConcept(concept: string) {
                   </div>
                 </div>
 
-                {currentSelection.type === "text" ? (
+                {selectedTargets.length > 1 ? (
+                  <p className="leading-4">
+                    {selectedTargets.length} selected items included
+                  </p>
+                ) : currentSelection.type === "text" ? (
                   <p className="max-h-8 overflow-hidden leading-4">
                     “{shortenTextForDisplay(currentSelection.text, 110)}”
                   </p>
@@ -2131,30 +4316,30 @@ async function handleExplainRelatedConcept(concept: string) {
               </div>
             ) : null}
 
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-slate-500">
-                Ask
+            <div>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-slate-500">
+                  Ask
                 </span>
 
-              <textarea
-                value={prompt}
-                onFocus={() => setPromptFocused(true)}
-                onBlur={() => setPromptFocused(false)}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Ask about the selected content..."
-                className={`w-full resize-none rounded-lg border p-2 text-sm outline-none transition-all focus:ring-2 focus:ring-slate-300 ${
-  shouldExpandPrompt ? "h-24" : "h-10"
-}`}
-              />
-            </label>
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Ask about the selected content..."
+                  className={`w-full resize-none rounded-lg border p-2 text-sm outline-none transition-all focus:ring-2 focus:ring-slate-300 ${
+                    shouldExpandPrompt ? "h-24" : "h-10"
+                  }`}
+                />
+              </label>
 
-            <button
-              onClick={handleAskAi}
-              disabled={isExplaining || isAskingQuestion}
-              className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isAskingQuestion ? "Asking..." : "Ask AI"}
-            </button>
+              <button
+                onClick={handleAskAi}
+                disabled={isSelectionAiBusy || isAskingQuestion}
+                className="mt-2 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isAskingQuestion ? "Asking..." : "Ask AI"}
+              </button>
+            </div>
           </div>
             </>
           ) : (
@@ -2182,39 +4367,58 @@ async function handleExplainRelatedConcept(concept: string) {
                         No annotations yet.
                       </p>
                     ) : (
-                      historyAnnotations.map((annotation) => (
-                        <button
-                          key={annotation.target.id}
-                          onMouseEnter={() =>
-                            previewHistoryAnnotation(annotation.target.id)
-                          }
-                          onClick={() => handleAnnotationClick(annotation)}
-                          className="w-full rounded-lg border border-slate-100 bg-slate-50 p-2 text-left transition hover:border-slate-200 hover:bg-white"
-                        >
-                          {annotation.target.type === "text" ? (
-                            <p className="text-xs leading-5 text-slate-600">
-                              {shortenTextForDisplay(
-                                annotation.target.text,
-                                130
-                              )}
-                            </p>
-                          ) : (
-                            <div className="space-y-1.5">
-                              <p className="text-xs text-slate-500">
-                                Region on page {annotation.target.pageNumber}
-                              </p>
+                      historyAnnotations.map((annotation) => {
+                        const targets = getAnnotationTargets(annotation);
+                        const primaryTarget = targets[0];
+                        const annotationName = getAnnotationDisplayName(annotation);
 
-                              {annotation.target.imageDataUrl && (
-                                <img
-                                  src={annotation.target.imageDataUrl}
-                                  alt="Annotated region"
-                                  className="max-h-20 rounded border bg-white"
-                                />
+                        return (
+                          <button
+                            key={annotation.id}
+                            onMouseEnter={() =>
+                              primaryTarget && previewHistoryAnnotation(primaryTarget.id)
+                            }
+                            onClick={() => handleAnnotationClick(annotation)}
+                            className="w-full rounded-lg border border-slate-100 bg-slate-50 p-2 text-left transition hover:border-slate-200 hover:bg-white"
+                          >
+                            <p className="text-xs font-semibold leading-5 text-slate-800">
+                              {annotationName}
+                            </p>
+
+                            <p className="mb-1 text-[11px] font-medium text-slate-400">
+                              {targets.length} selected item
+                              {targets.length === 1 ? "" : "s"}
+                            </p>
+
+                            <div className="space-y-1.5">
+                              {targets.slice(0, 3).map((target) =>
+                                target.type === "text" ? (
+                                  <p
+                                    key={target.id}
+                                    className="text-xs leading-5 text-slate-600"
+                                  >
+                                    {shortenTextForDisplay(target.text, 130)}
+                                  </p>
+                                ) : (
+                                  <div key={target.id} className="space-y-1">
+                                    <p className="text-xs text-slate-500">
+                                      Region on page {target.pageNumber}
+                                    </p>
+
+                                    {target.imageDataUrl && (
+                                      <img
+                                        src={target.imageDataUrl}
+                                        alt="Annotated region"
+                                        className="max-h-20 rounded border bg-white"
+                                      />
+                                    )}
+                                  </div>
+                                )
                               )}
                             </div>
-                          )}
-                        </button>
-                      ))
+                          </button>
+                        );
+                      })
                     )}
                   </div>
                 )}
@@ -2285,14 +4489,219 @@ async function handleExplainRelatedConcept(concept: string) {
         onStepChange={handleReaderGuideStepChange}
       />
 
+      {isReaderProfilePresetPickerOpen && (
+        <KnowledgeProfilePresetPicker
+          search={readerProfilePresetSearch}
+          onSearchChange={setReaderProfilePresetSearch}
+          onChoosePreset={chooseReaderProfilePreset}
+          onClose={closeReaderProfilePresetPicker}
+        />
+      )}
+
+      {readerProfileDialogMode && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeReaderProfileDialog();
+            }
+          }}
+        >
+          <form
+            onSubmit={handleReaderProfileDialogSubmit}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reader-profile-dialog-title"
+            className="w-full max-w-xl overflow-hidden rounded-xl bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Reader profile
+                </p>
+                <h2
+                  id="reader-profile-dialog-title"
+                  className="mt-1 text-lg font-semibold text-slate-950"
+                >
+                  {readerProfileDialogMode === "new"
+                    ? "New"
+                    : "Edit"}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeReaderProfileDialog}
+                disabled={isSavingReaderProfile}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
+                aria-label="Close profile editor"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                >
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="max-h-[72vh] space-y-4 overflow-auto px-5 py-4">
+              {readerProfileDialogError && (
+                <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {readerProfileDialogError}
+                </div>
+              )}
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Profile name
+                </span>
+                <input
+                  value={readerProfileDialogName}
+                  onChange={(event) => {
+                    setReaderProfileDialogName(event.target.value);
+                    setReaderProfileDialogError("");
+                  }}
+                  placeholder={DEFAULT_KNOWLEDGE_PROFILE_NAME}
+                  required
+                  className="mt-2 h-10 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Brief knowledge description
+                </span>
+                <textarea
+                  value={readerProfileDialogForm.backgroundSummary}
+                  onChange={(event) =>
+                    updateReaderProfileDialogForm(
+                      "backgroundSummary",
+                      event.target.value
+                    )
+                  }
+                  rows={4}
+                  placeholder={DEFAULT_KNOWLEDGE_DESCRIPTION}
+                  className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                />
+              </label>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Knowledge domains
+                  </span>
+                  <textarea
+                    value={readerProfileDialogForm.knownDomainsText}
+                    onChange={(event) =>
+                      updateReaderProfileDialogForm(
+                        "knownDomainsText",
+                        event.target.value
+                      )
+                    }
+                    rows={4}
+                    placeholder={"e.g. neuroscience\ne.g. computer science"}
+                    className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Weak areas
+                  </span>
+                  <textarea
+                    value={readerProfileDialogForm.weakAreasText}
+                    onChange={(event) =>
+                      updateReaderProfileDialogForm(
+                        "weakAreasText",
+                        event.target.value
+                      )
+                    }
+                    rows={4}
+                    placeholder={"e.g. math\ne.g. probability notation"}
+                    className="mt-2 w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              {readerProfileDialogMode === "edit" &&
+              readerProfileDialogProfileId ? (
+                <button
+                  type="button"
+                  onClick={handleDeleteReaderProfile}
+                  disabled={isSavingReaderProfile || isDeletingReaderProfile}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-red-100 bg-white text-red-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Delete profile"
+                  aria-label="Delete profile"
+                >
+                  {isDeletingReaderProfile ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border border-red-200 border-t-red-600" />
+                  ) : (
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="1.8"
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v5" />
+                      <path d="M14 11v5" />
+                    </svg>
+                  )}
+                </button>
+              ) : (
+                <span />
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeReaderProfileDialog}
+                  disabled={isSavingReaderProfile || isDeletingReaderProfile}
+                  className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={isSavingReaderProfile || isDeletingReaderProfile}
+                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:opacity-60"
+                >
+                  {isSavingReaderProfile
+                    ? "Saving..."
+                    : readerProfileDialogMode === "new"
+                      ? "Create"
+                      : "Save"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
+
       {annotationToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
-            <h2 className="text-lg font-semibold">Delete highlighted area?</h2>
+            <h2 className="text-lg font-semibold">Delete annotation?</h2>
 
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              This will remove the highlighted or cropped area and every saved
-              explanation version attached to it. This action cannot be undone.
+              This removes this annotation and its saved explanations.
             </p>
 
             <div className="mt-4 rounded-lg bg-slate-100 p-3 text-xs text-slate-600">

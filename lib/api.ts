@@ -1,4 +1,5 @@
 import type { PaperWithUrls } from "@/types/paper";
+import type { PaperAnalysisProfile } from "@/types/paperAnalysis";
 import type {
   AiAnnotation,
   AnnotationTarget,
@@ -6,7 +7,13 @@ import type {
   FollowUpExplanationItem,
 } from "@/types/annotation";
 import type { AskQuestionResponse, QuestionConversation } from "@/types/questions";
-import type { AuthToken, UserProfile } from "@/types/user";
+import type {
+  AuthToken,
+  UserKnowledgeProfile,
+  UserKnowledgeProfileListItem,
+  UserKnowledgeProfileRecord,
+  UserProfile,
+} from "@/types/user";
 import { getConfiguredApiBaseUrl } from "@/lib/deploymentConfig";
 
 export function getApiBaseUrl() {
@@ -124,6 +131,139 @@ export async function getCurrentUser(): Promise<UserProfile> {
   return response.json();
 }
 
+export async function updateUserKnowledgeProfile(
+  knowledgeProfile: UserKnowledgeProfile
+): Promise<UserProfile> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/users/me/knowledge-profile`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(knowledgeProfile),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response, "Failed to update knowledge profile")
+    );
+  }
+
+  return response.json();
+}
+
+export async function listUserKnowledgeProfiles(): Promise<
+  UserKnowledgeProfileListItem[]
+> {
+  const response = await fetch(`${getApiBaseUrl()}/api/users/me/knowledge-profiles`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response, "Failed to list knowledge profiles")
+    );
+  }
+
+  return response.json();
+}
+
+export async function getUserKnowledgeProfileRecord(
+  profileId: string
+): Promise<UserKnowledgeProfileRecord> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/users/me/knowledge-profiles/${profileId}`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response, "Failed to load knowledge profile")
+    );
+  }
+
+  return response.json();
+}
+
+export async function saveUserKnowledgeProfileRecord({
+  profileId,
+  profileName,
+  knowledgeProfile,
+  makeActive = true,
+}: {
+  profileId?: string | null;
+  profileName: string;
+  knowledgeProfile: UserKnowledgeProfile;
+  makeActive?: boolean;
+}): Promise<UserKnowledgeProfileRecord> {
+  const response = await fetch(`${getApiBaseUrl()}/api/users/me/knowledge-profiles`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({
+      id: profileId ?? null,
+      name: profileName,
+      knowledgeProfile,
+      makeActive,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response, "Failed to save knowledge profile")
+    );
+  }
+
+  return response.json();
+}
+
+export async function selectUserKnowledgeProfileRecord(
+  profileId: string
+): Promise<UserProfile> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/users/me/knowledge-profiles/${profileId}/select`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response, "Failed to select knowledge profile")
+    );
+  }
+
+  return response.json();
+}
+
+export async function deleteUserKnowledgeProfileRecord(
+  profileId: string
+): Promise<UserKnowledgeProfileListItem> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/users/me/knowledge-profiles/${profileId}`,
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      await getErrorMessage(response, "Failed to delete knowledge profile")
+    );
+  }
+
+  return response.json();
+}
+
 async function getErrorMessage(response: Response, fallback: string) {
   try {
     const errorBody = await response.json();
@@ -143,38 +283,24 @@ function normalizePaperFileUrl(paper: PaperWithUrls): PaperWithUrls {
     return paper;
   }
 
-  if (!paper.fileUrl) {
-    return paper;
-  }
-
-  const fileUrl = new URL(paper.fileUrl, getApiBaseUrl());
-
-  if (
-    fileUrl.hostname === "localhost" ||
-    fileUrl.hostname === "127.0.0.1" ||
-    fileUrl.hostname === "0.0.0.0"
-  ) {
-    const apiBaseUrl = new URL(getApiBaseUrl());
-
-    fileUrl.protocol = apiBaseUrl.protocol;
-    fileUrl.hostname = apiBaseUrl.hostname;
-    fileUrl.port = apiBaseUrl.port;
-  }
-
   return {
     ...paper,
-    fileUrl: fileUrl.toString(),
+    fileUrl: `${getApiBaseUrl()}/api/papers/${paper.id}/file`,
   };
 }
 
 export async function explainSelection({
   paperId,
   target,
+  targets,
   prompt,
+  knowledgeProfile,
 }: {
   paperId: string;
-  target: AnnotationTarget;
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   prompt: string;
+  knowledgeProfile?: UserKnowledgeProfile | null;
 }): Promise<{ explanation: AiExplanationContent }> {
   const response = await fetch(`${getApiBaseUrl()}/api/explain`, {
     method: "POST",
@@ -184,8 +310,10 @@ export async function explainSelection({
     },
     body: JSON.stringify({
       paperId,
-      target,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
       prompt,
+      knowledgeProfile: knowledgeProfile ?? null,
     }),
   });
 
@@ -196,20 +324,61 @@ export async function explainSelection({
   return response.json();
 }
 
+export async function summarizeSelection({
+  paperId,
+  target,
+  targets,
+  prompt,
+  knowledgeProfile,
+}: {
+  paperId: string;
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
+  prompt: string;
+  knowledgeProfile?: UserKnowledgeProfile | null;
+}): Promise<{ explanation: AiExplanationContent }> {
+  const response = await fetch(`${getApiBaseUrl()}/api/summarize`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({
+      paperId,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
+      prompt,
+      knowledgeProfile: knowledgeProfile ?? null,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to summarize selection");
+  }
+
+  return response.json();
+}
+
 export async function explainFollowUpConcept({
   paperId,
   annotationId,
   target,
+  targets,
   annotationPrompt,
   annotationExplanation,
   followUpPoint,
+  responseKind,
+  knowledgeProfile,
 }: {
   paperId: string;
   annotationId: string;
-  target: AnnotationTarget;
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   annotationPrompt: string;
   annotationExplanation: string;
   followUpPoint: string;
+  responseKind?: "explanation" | "summary";
+  knowledgeProfile?: UserKnowledgeProfile | null;
 }): Promise<{
   explanation: AiExplanationContent;
   followUp: FollowUpExplanationItem;
@@ -223,10 +392,13 @@ export async function explainFollowUpConcept({
     body: JSON.stringify({
       paperId,
       annotationId,
-      target,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
       annotationPrompt,
       annotationExplanation,
       followUpPoint,
+      responseKind: responseKind ?? null,
+      knowledgeProfile: knowledgeProfile ?? null,
     }),
   });
 
@@ -243,14 +415,20 @@ export async function askAiQuestion({
   conversationId,
   annotationId,
   target,
+  targets,
   annotationExplanation,
+  responseKind,
+  knowledgeProfile,
 }: {
   paperId: string;
   message: string;
   conversationId?: string | null;
   annotationId?: string | null;
   target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   annotationExplanation?: string | null;
+  responseKind?: "explanation" | "summary";
+  knowledgeProfile?: UserKnowledgeProfile | null;
 }): Promise<AskQuestionResponse> {
   const response = await fetch(`${getApiBaseUrl()}/api/ask`, {
     method: "POST",
@@ -263,8 +441,11 @@ export async function askAiQuestion({
       message,
       conversationId: conversationId ?? null,
       annotationId: annotationId ?? null,
-      target: target ?? null,
+      target: target ?? targets?.[0] ?? null,
+      targets: targets ?? (target ? [target] : []),
       annotationExplanation: annotationExplanation ?? null,
+      responseKind: responseKind ?? null,
+      knowledgeProfile: knowledgeProfile ?? null,
     }),
   });
 
@@ -371,6 +552,23 @@ export async function getPaper(paperId: string): Promise<PaperWithUrls> {
   }
 
   return normalizePaperFileUrl(await response.json());
+}
+
+export async function getPaperAnalysisProfile(
+  paperId: string
+): Promise<PaperAnalysisProfile> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/papers/${paperId}/analysis-profile`,
+    {
+      headers: getAuthHeaders(),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to load paper analysis profile");
+  }
+
+  return response.json();
 }
 
 export async function deletePaper(

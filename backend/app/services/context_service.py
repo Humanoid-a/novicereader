@@ -5,10 +5,21 @@ from app.storage.data_store import read_document_context
 import uuid
 
 
+def normalize_selection_targets(
+    target: AnnotationTarget | None = None,
+    targets: list[AnnotationTarget] | None = None,
+) -> list[AnnotationTarget]:
+    if targets:
+        return targets
+
+    return [target] if target is not None else []
+
+
 def build_context_for_selection(
     user_id: str,
     paper_id: str,
-    target: AnnotationTarget,
+    target: AnnotationTarget | None = None,
+    targets: list[AnnotationTarget] | None = None,
 ) -> DocumentContext:
     """
     Central place for building AI context.
@@ -53,27 +64,31 @@ def build_context_for_selection(
         )
     ]
 
-    if target.type == "text":
-        blocks.append(
-            DocumentContextBlock(
-                id=str(uuid.uuid4()),
-                type="selected_text",
-                title="Selected text",
-                content=target.text,
+    for index, selected_target in enumerate(
+        normalize_selection_targets(target=target, targets=targets),
+        start=1,
+    ):
+        if selected_target.type == "text":
+            blocks.append(
+                DocumentContextBlock(
+                    id=str(uuid.uuid4()),
+                    type="selected_text",
+                    title=f"Selected text {index}",
+                    content=selected_target.text,
+                )
             )
-        )
-    else:
-        blocks.append(
-            DocumentContextBlock(
-                id=str(uuid.uuid4()),
-                type="custom",
-                title="Selected visual region",
-                content=(
-                    f"Region selected on page {target.pageNumber}. "
-                    "The cropped image is included separately as image input."
-                ),
+        else:
+            blocks.append(
+                DocumentContextBlock(
+                    id=str(uuid.uuid4()),
+                    type="custom",
+                    title=f"Selected visual region {index}",
+                    content=(
+                        f"Region {index} selected on page {selected_target.pageNumber}. "
+                        "The cropped image is included separately as image input."
+                    ),
+                )
             )
-        )
 
     # Keep future saved blocks, such as abstract or summary.
     for block in saved_context.get("blocks", []):

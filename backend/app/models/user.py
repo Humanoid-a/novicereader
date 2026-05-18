@@ -25,11 +25,7 @@ class UserKnowledgeProfile(BaseModel):
 
     educationLevel: EducationLevel = "high_school"
     assumedFromEmptyOnboarding: bool = True
-    backgroundSummary: str = (
-        "No onboarding answers yet. Assume a curious high-school student who "
-        "may need technical terms, math notation, and research methods "
-        "explained from first principles."
-    )
+    backgroundSummary: str = ""
     knownCourses: List[str] = Field(default_factory=list)
     knownConcepts: List[str] = Field(default_factory=list)
     knownDomains: List[str] = Field(default_factory=list)
@@ -49,11 +45,34 @@ class KnowledgeProfileSummary(BaseModel):
     explanationGuidance: str
 
 
+class UserKnowledgeProfileRecord(BaseModel):
+    id: str
+    name: str
+    knowledgeProfile: UserKnowledgeProfile = Field(default_factory=UserKnowledgeProfile)
+    createdAt: str
+    updatedAt: str
+
+
+class UserKnowledgeProfileListItem(BaseModel):
+    id: str
+    name: str
+    isSelected: bool = False
+    updatedAt: str
+
+
+class SaveKnowledgeProfileRequest(BaseModel):
+    id: Optional[str] = None
+    name: str
+    knowledgeProfile: UserKnowledgeProfile
+    makeActive: bool = True
+
+
 class UserProfile(BaseModel):
     id: str
     username: str
     displayName: str = "NoviceReader User"
     knowledgeProfile: UserKnowledgeProfile = Field(default_factory=UserKnowledgeProfile)
+    selectedKnowledgeProfileId: Optional[str] = None
     createdAt: str
     updatedAt: str
 

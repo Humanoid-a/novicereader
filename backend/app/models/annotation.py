@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal, Optional, List, Union
 
 
@@ -75,6 +75,7 @@ class FollowUpExplanationItem(BaseModel):
 
 class AiExplanationContent(BaseModel):
     mainExplanation: str
+    annotationName: str = ""
     knowledgePoints: List[KnowledgePoint] = Field(default_factory=list)
     followUpConversation: List[ConversationMessage] = Field(default_factory=list)
     relatedConcepts: List[str] = Field(default_factory=list)
@@ -105,9 +106,9 @@ class AiExplanationContent(BaseModel):
             follow_up_lines.append(f"- Follow-up question: {prompt_text}")
 
             saved_item = saved_follow_ups.get(prompt_key)
-            if saved_item and saved_item.response.strip():
+            if saved_item and (saved_item.response or "").strip():
                 follow_up_lines.append(
-                    f"  Saved follow-up explanation: {saved_item.response.strip()}"
+                    f"  Saved follow-up explanation: {(saved_item.response or '').strip()}"
                 )
 
         for item in self.followUpExplanations:
@@ -120,9 +121,9 @@ class AiExplanationContent(BaseModel):
                 continue
 
             follow_up_lines.append(f"- Follow-up question: {prompt_text}")
-            if item.response.strip():
+            if (item.response or "").strip():
                 follow_up_lines.append(
-                    f"  Saved follow-up explanation: {item.response.strip()}"
+                    f"  Saved follow-up explanation: {(item.response or '').strip()}"
                 )
 
         if follow_up_lines:
@@ -134,11 +135,25 @@ class AiExplanationContent(BaseModel):
         return "\n\n".join(sections)
 
 
+class AiAnnotationVersion(BaseModel):
+    id: str
+    prompt: str
+    response: str
+    explanation: AiExplanationContent
+    responseKind: Optional[Literal["explanation", "summary"]] = None
+    targetIds: List[str] = Field(default_factory=list)
+    createdAt: str
+
+
 class AiAnnotation(BaseModel):
     id: str
     paperId: str
     userId: str
-    target: AnnotationTarget
+
+    # Compatibility field for older reader/storage code. New annotations should
+    # use targets as the canonical selected-content list.
+    target: Optional[AnnotationTarget] = None
+    targets: List[AnnotationTarget] = Field(default_factory=list)
     prompt: str
 
     # Simple compatibility field.
@@ -146,24 +161,54 @@ class AiAnnotation(BaseModel):
 
     # Structured explanation for future UI sections.
     explanation: AiExplanationContent
+    summary: Optional[AiExplanationContent] = None
+    responseKind: Optional[Literal["explanation", "summary"]] = None
+    versions: List[AiAnnotationVersion] = Field(default_factory=list)
 
     createdAt: str
     isDeleted: bool = False
     deletedAt: Optional[str] = None
 
+    @model_validator(mode="after")
+    def normalize_targets_and_versions(self):
+        if self.target is None and self.targets:
+            self.target = self.targets[0]
+
+        if not self.targets and self.target is not None:
+            self.targets = [self.target]
+
+        if not self.versions:
+            self.versions = [
+                AiAnnotationVersion(
+                    id=self.id,
+                    prompt=self.prompt,
+                    response=self.response,
+                    explanation=self.explanation,
+                    responseKind=self.responseKind,
+                    targetIds=[target.id for target in self.targets],
+                    createdAt=self.createdAt,
+                )
+            ]
+
+        return self
+
     def __str__(self) -> str:
         sections = [
             f"Annotation id: {self.id}",
-            f"Annotation target id: {self.target.id}",
-            f"Annotation type: {self.target.type}",
+            "Annotation target ids: " + ", ".join(target.id for target in self.targets),
+            "Annotation target types: " + ", ".join(target.type for target in self.targets),
         ]
 
-        if self.target.type == "text":
-            sections.append(f"Selected text:\n{self.target.text}")
-        else:
-            sections.append(f"Selected region page: {self.target.pageNumber}")
+        for index, target in enumerate(self.targets, start=1):
+            if target.type == "text":
+                sections.append(f"Selected item {index} text:\n{target.text}")
+            else:
+                sections.append(f"Selected item {index} region page: {target.pageNumber}")
+
+        if self.summary is not None:
+            sections.append("Summary part:\n" + str(self.summary))
 
         if self.explanation is not None:
-            sections.append("Annotation explanation and follow-ups:\n" + str(self.explanation))
+            sections.append("Explanation part:\n" + str(self.explanation))
 
         return "\n\n".join(sections)

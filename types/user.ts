@@ -22,7 +22,23 @@ export type UserProfile = {
   username: string;
   displayName: string;
   knowledgeProfile: UserKnowledgeProfile;
+  selectedKnowledgeProfileId?: string | null;
   createdAt: string;
+  updatedAt: string;
+};
+
+export type UserKnowledgeProfileRecord = {
+  id: string;
+  name: string;
+  knowledgeProfile: UserKnowledgeProfile;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UserKnowledgeProfileListItem = {
+  id: string;
+  name: string;
+  isSelected: boolean;
   updatedAt: string;
 };
 

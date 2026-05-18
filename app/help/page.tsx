@@ -39,6 +39,23 @@ export default function HelpPage() {
             </p>
           </div>
 
+          <div>
+            <h2 className="text-sm font-semibold text-slate-950">
+              Knowledge Profiles
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Knowledge profiles tell NoviceReader what you already know, which
+              domains you are comfortable with, and which areas feel weak. The
+              selected profile is sent with explanation, summary, and question
+              requests so AI responses can use the right level of detail.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              You can create multiple profiles from presets or an empty profile,
+              then switch between them from the reader profile menu. Profiles
+              are saved locally for the current account or guest session.
+            </p>
+          </div>
+
           <Link
             href="/"
             className="inline-flex rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-700"

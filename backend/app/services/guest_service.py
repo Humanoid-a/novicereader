@@ -3,7 +3,7 @@ from urllib.parse import quote
 import secrets
 import uuid
 
-from fastapi import HTTPException, UploadFile
+from fastapi import BackgroundTasks, HTTPException, UploadFile
 
 from app.config import settings
 from app.models.guest import GuestSession, GuestSessionResponse
@@ -147,10 +147,15 @@ async def upload_guest_paper(
     session_id: str,
     session_token: str,
     file: UploadFile,
+    background_tasks: BackgroundTasks | None = None,
 ) -> PaperWithUrls:
     session = get_guest_session(session_id, session_token)
     guest_user_id = ensure_guest_user(session)
-    paper = await upload_paper_for_user(guest_user_id, file)
+    paper = await upload_paper_for_user(
+        guest_user_id,
+        file,
+        background_tasks=background_tasks,
+    )
 
     if paper.id not in session.paperIds:
         session.paperIds.append(paper.id)

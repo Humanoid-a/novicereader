@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Novice Reader",
   description: "AI-powered research paper reading helper for beginners.",
+  icons: {
+    icon: "/novicereader-logo.ico",
+  },
 };
 
 export default function RootLayout({

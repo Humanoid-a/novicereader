@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, Header, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Header, Query, UploadFile
 from app.models.ai import (
     AiChatRequest,
     AiChatResponse,
@@ -8,16 +8,22 @@ from app.models.ai import (
     ExplainResponse,
     FollowUpExplanationRequest,
     FollowUpExplanationResponse,
+    SummarizeRequest,
+    SummarizeResponse,
 )
 from app.models.annotation import AiAnnotation
 from app.models.chat import QuestionAnswerTurn, QuestionConversation
 from app.models.guest import EndGuestSessionRequest, GuestSessionResponse
 from app.models.paper import PaperWithUrls
+from app.models.paper_analysis import PaperAnalysisProfile
+from app.models.user import UserKnowledgeProfile, UserProfile
 from app.services.ai_service import (
     call_openai_chat,
     call_openai_for_explanation,
     call_openai_for_follow_up_explanation,
     call_openai_for_question,
+    call_openai_for_summary,
+    format_annotation_context_for_prompt,
 )
 from app.services.annotation_service import (
     create_annotation,
@@ -43,6 +49,8 @@ from app.services.question_service import (
     list_question_turns,
     save_question_turn,
 )
+from app.services.paper_analysis_service import get_paper_analysis_profile
+from app.services.user_service import get_user_profile, update_user_knowledge_profile
 
 
 router = APIRouter(prefix="/api/guest", tags=["guest"])
@@ -72,6 +80,16 @@ def _find_annotation_for_request(request: object, user_id: str):
     return None
 
 
+def _get_annotation_response_content(annotation, response_kind: str | None):
+    if annotation is None:
+        return None
+
+    if response_kind == "summary" and annotation.summary is not None:
+        return annotation.summary
+
+    return annotation.explanation
+
+
 @router.post("/session", response_model=GuestSessionResponse)
 def create_guest_reader_session():
     return create_guest_session()
@@ -85,8 +103,36 @@ def end_guest_reader_session(request: EndGuestSessionRequest):
     )
 
 
+@router.get("/me", response_model=UserProfile)
+def read_guest_reader_profile(
+    x_guest_session_id: str = Header(...),
+    x_guest_session_token: str = Header(...),
+):
+    guest_user_id = get_guest_user_id_from_headers(
+        x_guest_session_id=x_guest_session_id,
+        x_guest_session_token=x_guest_session_token,
+    )
+
+    return get_user_profile(guest_user_id)
+
+
+@router.put("/me/knowledge-profile", response_model=UserProfile)
+def put_guest_reader_knowledge_profile(
+    knowledge_profile: UserKnowledgeProfile,
+    x_guest_session_id: str = Header(...),
+    x_guest_session_token: str = Header(...),
+):
+    guest_user_id = get_guest_user_id_from_headers(
+        x_guest_session_id=x_guest_session_id,
+        x_guest_session_token=x_guest_session_token,
+    )
+
+    return update_user_knowledge_profile(guest_user_id, knowledge_profile)
+
+
 @router.post("/papers", response_model=PaperWithUrls)
 async def upload_guest_reader_paper(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     x_guest_session_id: str = Header(...),
     x_guest_session_token: str = Header(...),
@@ -95,6 +141,7 @@ async def upload_guest_reader_paper(
         session_id=x_guest_session_id,
         session_token=x_guest_session_token,
         file=file,
+        background_tasks=background_tasks,
     )
 
 
@@ -120,6 +167,20 @@ def read_guest_reader_paper(
         session_token=x_guest_session_token,
         paper_id=paper_id,
     )
+
+
+@router.get("/papers/{paper_id}/analysis-profile", response_model=PaperAnalysisProfile)
+def read_guest_reader_paper_analysis(
+    paper_id: str,
+    x_guest_session_id: str = Header(...),
+    x_guest_session_token: str = Header(...),
+):
+    guest_user_id = get_guest_user_id_from_headers(
+        x_guest_session_id=x_guest_session_id,
+        x_guest_session_token=x_guest_session_token,
+    )
+
+    return get_paper_analysis_profile(user_id=guest_user_id, paper_id=paper_id)
 
 
 @router.post("/papers/{paper_id}/delete")
@@ -218,18 +279,46 @@ def explain_guest_reader_selection(
         x_guest_session_id=x_guest_session_id,
         x_guest_session_token=x_guest_session_token,
     )
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
     context = build_context_for_selection(
         user_id=guest_user_id,
         paper_id=request.paperId,
-        target=request.target,
+        targets=request_targets,
     )
     explanation = call_openai_for_explanation(
-        target=request.target,
+        targets=request_targets,
         prompt=request.prompt,
         context=context,
+        knowledge_profile=request.knowledgeProfile,
     )
 
     return ExplainResponse(explanation=explanation)
+
+
+@router.post("/summarize", response_model=SummarizeResponse)
+def summarize_guest_reader_selection(
+    request: SummarizeRequest,
+    x_guest_session_id: str = Header(...),
+    x_guest_session_token: str = Header(...),
+):
+    guest_user_id = get_guest_user_id_from_headers(
+        x_guest_session_id=x_guest_session_id,
+        x_guest_session_token=x_guest_session_token,
+    )
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
+    context = build_context_for_selection(
+        user_id=guest_user_id,
+        paper_id=request.paperId,
+        targets=request_targets,
+    )
+    explanation = call_openai_for_summary(
+        targets=request_targets,
+        prompt=request.prompt,
+        context=context,
+        knowledge_profile=request.knowledgeProfile,
+    )
+
+    return SummarizeResponse(explanation=explanation)
 
 
 @router.post("/explain/follow-up", response_model=FollowUpExplanationResponse)
@@ -242,22 +331,29 @@ def explain_guest_reader_follow_up(
         x_guest_session_id=x_guest_session_id,
         x_guest_session_token=x_guest_session_token,
     )
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
     context = build_context_for_selection(
         user_id=guest_user_id,
         paper_id=request.paperId,
-        target=request.target,
+        targets=request_targets,
     )
     annotation = _find_annotation_for_request(request, guest_user_id)
+    annotation_content = _get_annotation_response_content(
+        annotation,
+        request.responseKind,
+    )
     explanation = call_openai_for_follow_up_explanation(
         target=request.target,
+        targets=request_targets,
         follow_up_point=request.followUpPoint,
         annotation_prompt=request.annotationPrompt,
         annotation_explanation=(
-            annotation.explanation
-            if annotation is not None
+            annotation_content
+            if annotation_content is not None
             else request.annotationExplanation
         ),
         context=context,
+        knowledge_profile=request.knowledgeProfile,
     )
     follow_up = upsert_annotation_follow_up_explanation(
         user_id=guest_user_id,
@@ -265,6 +361,7 @@ def explain_guest_reader_follow_up(
         annotation_id=request.annotationId,
         prompt=request.followUpPoint,
         response=explanation.mainExplanation,
+        response_kind=request.responseKind,
     )
 
     return FollowUpExplanationResponse(explanation=explanation, followUp=follow_up)
@@ -281,11 +378,12 @@ def ask_guest_reader_question(
         x_guest_session_token=x_guest_session_token,
     )
 
-    if request.target is not None:
+    request_targets = request.targets or ([request.target] if request.target is not None else [])
+    if request_targets:
         context = build_context_for_selection(
             user_id=guest_user_id,
             paper_id=request.paperId,
-            target=request.target,
+            targets=request_targets,
         )
     else:
         context = build_context_for_question(
@@ -299,10 +397,9 @@ def ask_guest_reader_question(
         conversation_id=request.conversationId,
     )
     annotation = _find_annotation_for_request(request, guest_user_id)
-    annotation_explanation = (
-        annotation.explanation
-        if annotation is not None and annotation.explanation is not None
-        else request.annotationExplanation
+    annotation_explanation = format_annotation_context_for_prompt(
+        annotation,
+        request.annotationExplanation,
     )
     answer = call_openai_for_question(
         message=request.message,
@@ -310,6 +407,7 @@ def ask_guest_reader_question(
         target=request.target,
         annotation_explanation=annotation_explanation,
         previous_turns=previous_conversation.turns if previous_conversation else [],
+        knowledge_profile=request.knowledgeProfile,
     )
     turn, conversation = save_question_turn(
         user_id=guest_user_id,

@@ -65,3 +65,7 @@ def get_chat_thread_path(user_id: str, paper_id: str) -> Path:
 
 def get_document_context_path(user_id: str, paper_id: str) -> Path:
     return get_user_paper_dir(user_id, paper_id) / "context.json"
+
+
+def get_paper_analysis_profile_path(user_id: str, paper_id: str) -> Path:
+    return get_user_paper_dir(user_id, paper_id) / "analysis_profile.json"

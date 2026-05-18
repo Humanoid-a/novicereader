@@ -98,13 +98,16 @@ function localPaperToPaperWithUrl(paper: LocalPaperRecord): PaperWithUrls {
 }
 
 function buildLocalExplanation(
-  target: AnnotationTarget,
+  targets: AnnotationTarget[],
   prompt: string,
 ): AiExplanationContent {
-  const selectedPreview =
-    target.type === "text"
-      ? target.text.replace(/\s+/g, " ").trim().slice(0, 520)
-      : `the selected region on page ${target.pageNumber}`;
+  const selectedPreview = targets
+    .map((target, index) =>
+      target.type === "text"
+        ? `selection ${index + 1}: ${target.text.replace(/\s+/g, " ").trim().slice(0, 520)}`
+        : `selection ${index + 1}: the selected region on page ${target.pageNumber}`,
+    )
+    .join("; ");
   const mainExplanation =
     "Local-only note:\n\n"
     + "This paper is stored on this computer, so cloud AI explanation is not "
@@ -116,12 +119,56 @@ function buildLocalExplanation(
       prompt.trim().length > 0
         ? `${mainExplanation}\n\nPrompt: ${prompt.trim()}`
         : mainExplanation,
+    annotationName:
+      targets.length > 1
+        ? "Local multi-selection"
+        : targets[0]?.type === "region"
+          ? `Region on page ${targets[0].pageNumber}`
+          : "Local highlighted text",
     knowledgePoints: [],
     followUpConversation: [],
     relatedConcepts:
-      target.type === "text"
+      targets.some((target) => target.type === "text")
         ? ["What does this selected text mean?", "Which terms need background?"]
-        : ["What should I notice in this selected region?"],
+        : ["What should I notice in these selected regions?"],
+    followUpExplanations: [],
+  };
+}
+
+function buildLocalSummary(
+  targets: AnnotationTarget[],
+  prompt: string,
+): AiExplanationContent {
+  const selectedPreview = targets
+    .map((target, index) =>
+      target.type === "text"
+        ? `selection ${index + 1}: ${target.text.replace(/\s+/g, " ").trim().slice(0, 520)}`
+        : `selection ${index + 1}: the selected region on page ${target.pageNumber}`,
+    )
+    .join("; ");
+  const mainExplanation =
+    "Local-only summary:\n\n"
+    + "This paper is stored on this computer, so cloud AI summary is not "
+    + "available for this selection yet. The selection is saved locally.\n\n"
+    + `Selected content: ${selectedPreview}`;
+
+  return {
+    mainExplanation:
+      prompt.trim().length > 0
+        ? `${mainExplanation}\n\nPrompt: ${prompt.trim()}`
+        : mainExplanation,
+    annotationName:
+      targets.length > 1
+        ? "Local multi-selection summary"
+        : targets[0]?.type === "region"
+          ? `Region summary page ${targets[0].pageNumber}`
+          : "Local text summary",
+    knowledgePoints: [],
+    followUpConversation: [],
+    relatedConcepts:
+      targets.some((target) => target.type === "text")
+        ? ["Which details were omitted from the summary?", "What does this selected text mean?"]
+        : ["What should I notice in these selected regions?"],
     followUpExplanations: [],
   };
 }
@@ -258,11 +305,68 @@ export async function createLocalPaperAnnotation(
   annotation: AiAnnotation,
 ): Promise<AiAnnotation> {
   const annotations = await readLocalAnnotations(paperId);
-  const nextAnnotations = [...annotations, annotation];
+  const nextAnnotations = annotations.some((stored) => stored.id === annotation.id)
+    ? annotations.map((stored) => stored.id === annotation.id ? annotation : stored)
+    : [...annotations, annotation];
 
   await syncLocalPaperAnnotations(paperId, nextAnnotations);
 
   return annotation;
+}
+
+export async function deleteLocalAnnotation({
+  paperId,
+  annotationId,
+}: {
+  paperId: string;
+  annotationId: string;
+}) {
+  const annotations = await readLocalAnnotations(paperId);
+  const conversations = await listLocalConversations(paperId);
+  const annotationToDelete = annotations.find(
+    (annotation) => annotation.id === annotationId,
+  );
+
+  if (!annotationToDelete) {
+    throw new Error("Annotation not found.");
+  }
+
+  const targetIds = (annotationToDelete.targets?.length
+    ? annotationToDelete.targets
+    : [annotationToDelete.target]
+  ).map((target) => target.id);
+  const hasLinkedConversation = conversations.some((conversation) =>
+    conversation.turns.some((turn) =>
+      targetIds.includes(turn.linkedSelection?.annotationTargetId ?? ""),
+    ),
+  );
+
+  if (hasLinkedConversation) {
+    const timestamp = nowIso();
+
+    await syncLocalPaperAnnotations(
+      paperId,
+      annotations.map((annotation) =>
+        annotation.id === annotationId
+          ? {
+              ...annotation,
+              isDeleted: true,
+              deletedAt: timestamp,
+            }
+          : annotation,
+      ),
+    );
+  } else {
+    await syncLocalPaperAnnotations(
+      paperId,
+      annotations.filter((annotation) => annotation.id !== annotationId),
+    );
+  }
+
+  return {
+    success: true,
+    deletedAnnotationId: annotationId,
+  };
 }
 
 export async function deleteLocalAnnotationTarget({
@@ -316,13 +420,29 @@ export async function deleteLocalAnnotationTarget({
 
 export async function explainLocalSelection({
   target,
+  targets,
   prompt,
 }: {
-  target: AnnotationTarget;
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   prompt: string;
 }): Promise<{ explanation: AiExplanationContent }> {
   return {
-    explanation: buildLocalExplanation(target, prompt),
+    explanation: buildLocalExplanation(targets ?? (target ? [target] : []), prompt),
+  };
+}
+
+export async function summarizeLocalSelection({
+  target,
+  targets,
+  prompt,
+}: {
+  target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
+  prompt: string;
+}): Promise<{ explanation: AiExplanationContent }> {
+  return {
+    explanation: buildLocalSummary(targets ?? (target ? [target] : []), prompt),
   };
 }
 
@@ -330,10 +450,12 @@ export async function explainLocalFollowUpConcept({
   paperId,
   annotationId,
   followUpPoint,
+  responseKind,
 }: {
   paperId: string;
   annotationId: string;
   followUpPoint: string;
+  responseKind?: "explanation" | "summary";
 }): Promise<{
   explanation: AiExplanationContent;
   followUp: FollowUpExplanationItem;
@@ -351,15 +473,32 @@ export async function explainLocalFollowUpConcept({
     annotation.id === annotationId
       ? {
           ...annotation,
-          explanation: {
-            ...annotation.explanation,
-            followUpExplanations: [
-              ...(annotation.explanation.followUpExplanations ?? []).filter(
-                (savedFollowUp) => savedFollowUp.prompt !== followUpPoint,
-              ),
-              followUp,
-            ],
-          },
+          ...(responseKind === "summary"
+            ? {
+                summary: {
+                  ...(annotation.summary ?? annotation.explanation),
+                  followUpExplanations: [
+                    ...(
+                      annotation.summary?.followUpExplanations ??
+                      []
+                    ).filter(
+                      (savedFollowUp) => savedFollowUp.prompt !== followUpPoint,
+                    ),
+                    followUp,
+                  ],
+                },
+              }
+            : {
+                explanation: {
+                  ...annotation.explanation,
+                  followUpExplanations: [
+                    ...(annotation.explanation.followUpExplanations ?? []).filter(
+                      (savedFollowUp) => savedFollowUp.prompt !== followUpPoint,
+                    ),
+                    followUp,
+                  ],
+                },
+              }),
         }
       : annotation,
   );
@@ -416,7 +555,9 @@ export async function askLocalAiQuestion({
   conversationId?: string | null;
   annotationId?: string | null;
   target?: AnnotationTarget | null;
+  targets?: AnnotationTarget[];
   annotationExplanation?: string | null;
+  responseKind?: "explanation" | "summary";
 }) {
   const conversations = await listLocalConversations(paperId);
   const timestamp = nowIso();

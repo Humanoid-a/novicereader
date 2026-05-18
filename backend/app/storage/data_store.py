@@ -13,6 +13,7 @@ from app.storage.paths import (
     get_annotations_path,
     get_chat_thread_path,
     get_document_context_path,
+    get_paper_analysis_profile_path,
     get_user_token_usage_path,
 )
 
@@ -68,9 +69,19 @@ def ensure_database_schema() -> None:
             password_hash TEXT,
             disabled BOOLEAN NOT NULL DEFAULT FALSE,
             knowledge_profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+            knowledge_profiles JSONB NOT NULL DEFAULT '[]'::jsonb,
+            selected_knowledge_profile_id TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
+        """,
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS knowledge_profiles JSONB NOT NULL DEFAULT '[]'::jsonb
+        """,
+        """
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS selected_knowledge_profile_id TEXT
         """,
         """
         CREATE TABLE IF NOT EXISTS papers (
@@ -79,11 +90,16 @@ def ensure_database_schema() -> None:
             original_filename TEXT NOT NULL,
             stored_filename TEXT NOT NULL,
             storage_key TEXT,
+            analysis_profile_id TEXT,
             content_type TEXT NOT NULL,
             size_bytes BIGINT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
+        """,
+        """
+        ALTER TABLE papers
+        ADD COLUMN IF NOT EXISTS analysis_profile_id TEXT
         """,
         """
         CREATE INDEX IF NOT EXISTS papers_user_id_idx
@@ -97,6 +113,21 @@ def ensure_database_schema() -> None:
             updated_at TEXT NOT NULL,
             PRIMARY KEY (user_id, paper_id)
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS paper_analysis_profiles (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            paper_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            data JSONB NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS paper_analysis_profiles_user_paper_idx
+        ON paper_analysis_profiles(user_id, paper_id)
         """,
         """
         CREATE TABLE IF NOT EXISTS annotations (
@@ -180,7 +211,8 @@ def get_user_record(user_id: str) -> dict | None:
             text(
                 """
                 SELECT id, username, display_name, password_hash, disabled,
-                       knowledge_profile, created_at, updated_at
+                       knowledge_profile, knowledge_profiles,
+                       selected_knowledge_profile_id, created_at, updated_at
                 FROM users
                 WHERE id = :id
                 """
@@ -199,6 +231,8 @@ def get_user_record(user_id: str) -> dict | None:
         "passwordHash": data["password_hash"],
         "disabled": data["disabled"],
         "knowledgeProfile": _coerce_json(data["knowledge_profile"], {}),
+        "knowledgeProfiles": _coerce_json(data["knowledge_profiles"], []),
+        "selectedKnowledgeProfileId": data["selected_knowledge_profile_id"],
         "createdAt": data["created_at"],
         "updatedAt": data["updated_at"],
     }
@@ -218,11 +252,14 @@ def save_user_record(user: dict) -> None:
                 """
                 INSERT INTO users (
                     id, username, display_name, password_hash, disabled,
-                    knowledge_profile, created_at, updated_at
+                    knowledge_profile, knowledge_profiles,
+                    selected_knowledge_profile_id, created_at, updated_at
                 )
                 VALUES (
                     :id, :username, :display_name, :password_hash, :disabled,
-                    CAST(:knowledge_profile AS jsonb), :created_at, :updated_at
+                    CAST(:knowledge_profile AS jsonb),
+                    CAST(:knowledge_profiles AS jsonb),
+                    :selected_knowledge_profile_id, :created_at, :updated_at
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     username = EXCLUDED.username,
@@ -230,6 +267,8 @@ def save_user_record(user: dict) -> None:
                     password_hash = EXCLUDED.password_hash,
                     disabled = EXCLUDED.disabled,
                     knowledge_profile = EXCLUDED.knowledge_profile,
+                    knowledge_profiles = EXCLUDED.knowledge_profiles,
+                    selected_knowledge_profile_id = EXCLUDED.selected_knowledge_profile_id,
                     updated_at = EXCLUDED.updated_at
                 """
             ),
@@ -240,6 +279,8 @@ def save_user_record(user: dict) -> None:
                 "password_hash": user.get("passwordHash"),
                 "disabled": bool(user.get("disabled", False)),
                 "knowledge_profile": _as_json(user.get("knowledgeProfile", {})),
+                "knowledge_profiles": _as_json(user.get("knowledgeProfiles", [])),
+                "selected_knowledge_profile_id": user.get("selectedKnowledgeProfileId"),
                 "created_at": user["createdAt"],
                 "updated_at": user["updatedAt"],
             },
@@ -259,7 +300,8 @@ def get_paper_record(user_id: str, paper_id: str) -> dict | None:
             text(
                 """
                 SELECT id, user_id, original_filename, stored_filename,
-                       storage_key, content_type, size_bytes, created_at, updated_at
+                       storage_key, analysis_profile_id, content_type, size_bytes,
+                       created_at, updated_at
                 FROM papers
                 WHERE id = :id AND user_id = :user_id
                 """
@@ -277,6 +319,7 @@ def get_paper_record(user_id: str, paper_id: str) -> dict | None:
         "originalFilename": data["original_filename"],
         "storedFilename": data["stored_filename"],
         "storageKey": data["storage_key"],
+        "analysisProfileId": data["analysis_profile_id"],
         "contentType": data["content_type"],
         "sizeBytes": int(data["size_bytes"]),
         "createdAt": data["created_at"],
@@ -297,7 +340,8 @@ def list_paper_records(user_id: str) -> list[dict]:
             text(
                 """
                 SELECT id, user_id, original_filename, stored_filename,
-                       storage_key, content_type, size_bytes, created_at, updated_at
+                       storage_key, analysis_profile_id, content_type, size_bytes,
+                       created_at, updated_at
                 FROM papers
                 WHERE user_id = :user_id
                 ORDER BY created_at DESC
@@ -313,6 +357,7 @@ def list_paper_records(user_id: str) -> list[dict]:
             "originalFilename": row.original_filename,
             "storedFilename": row.stored_filename,
             "storageKey": row.storage_key,
+            "analysisProfileId": row.analysis_profile_id,
             "contentType": row.content_type,
             "sizeBytes": int(row.size_bytes),
             "createdAt": row.created_at,
@@ -360,16 +405,18 @@ def save_paper_record(paper: dict) -> None:
                 """
                 INSERT INTO papers (
                     id, user_id, original_filename, stored_filename, storage_key,
-                    content_type, size_bytes, created_at, updated_at
+                    analysis_profile_id, content_type, size_bytes, created_at, updated_at
                 )
                 VALUES (
                     :id, :user_id, :original_filename, :stored_filename, :storage_key,
-                    :content_type, :size_bytes, :created_at, :updated_at
+                    :analysis_profile_id, :content_type, :size_bytes, :created_at,
+                    :updated_at
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     original_filename = EXCLUDED.original_filename,
                     stored_filename = EXCLUDED.stored_filename,
                     storage_key = EXCLUDED.storage_key,
+                    analysis_profile_id = EXCLUDED.analysis_profile_id,
                     content_type = EXCLUDED.content_type,
                     size_bytes = EXCLUDED.size_bytes,
                     updated_at = EXCLUDED.updated_at
@@ -381,6 +428,7 @@ def save_paper_record(paper: dict) -> None:
                 "original_filename": paper["originalFilename"],
                 "stored_filename": paper["storedFilename"],
                 "storage_key": paper.get("storageKey"),
+                "analysis_profile_id": paper.get("analysisProfileId"),
                 "content_type": paper["contentType"],
                 "size_bytes": int(paper["sizeBytes"]),
                 "created_at": paper["createdAt"],
@@ -401,6 +449,15 @@ def delete_paper_record(user_id: str, paper_id: str) -> None:
 
     with get_engine().begin() as connection:
         params = {"paper_id": paper_id, "user_id": user_id}
+        connection.execute(
+            text(
+                """
+                DELETE FROM paper_analysis_profiles
+                WHERE paper_id = :paper_id AND user_id = :user_id
+                """
+            ),
+            params,
+        )
         connection.execute(
             text(
                 """
@@ -481,6 +538,72 @@ def write_document_context(user_id: str, paper_id: str, context: dict) -> None:
         )
 
 
+def get_paper_analysis_profile_record(user_id: str, paper_id: str) -> dict | None:
+    if not is_database_enabled():
+        path = get_paper_analysis_profile_path(user_id, paper_id)
+        profile = read_json(path, None)
+
+        if isinstance(profile, dict):
+            return profile
+
+        return None
+
+    with get_engine().connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT data
+                FROM paper_analysis_profiles
+                WHERE user_id = :user_id AND paper_id = :paper_id
+                """
+            ),
+            {"user_id": user_id, "paper_id": paper_id},
+        ).first()
+
+    if row is None:
+        return None
+
+    return _coerce_json(row.data, {})
+
+
+def save_paper_analysis_profile_record(profile: dict) -> None:
+    if not is_database_enabled():
+        write_json(
+            get_paper_analysis_profile_path(profile["userId"], profile["paperId"]),
+            profile,
+        )
+        return
+
+    with get_engine().begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_analysis_profiles (
+                    id, user_id, paper_id, status, data, created_at, updated_at
+                )
+                VALUES (
+                    :id, :user_id, :paper_id, :status, CAST(:data AS jsonb),
+                    :created_at, :updated_at
+                )
+                ON CONFLICT (user_id, paper_id) DO UPDATE SET
+                    id = EXCLUDED.id,
+                    status = EXCLUDED.status,
+                    data = EXCLUDED.data,
+                    updated_at = EXCLUDED.updated_at
+                """
+            ),
+            {
+                "id": profile["id"],
+                "user_id": profile["userId"],
+                "paper_id": profile["paperId"],
+                "status": profile["status"],
+                "data": _as_json(profile),
+                "created_at": profile["createdAt"],
+                "updated_at": profile["updatedAt"],
+            },
+        )
+
+
 def read_annotation_records(user_id: str, paper_id: str) -> list[dict]:
     if not is_database_enabled():
         return read_json(get_annotations_path(user_id, paper_id), [])
@@ -539,11 +662,13 @@ def save_annotation_record(
         write_json(get_annotations_path(user_id, paper_id), annotations)
         return
 
+    targets = annotation.get("targets")
+    first_target = (targets[0] if isinstance(targets, list) and targets else None) or annotation.get("target") or {}
     params = {
         "id": annotation["id"],
         "user_id": user_id,
         "paper_id": paper_id,
-        "target_id": annotation.get("target", {}).get("id", ""),
+        "target_id": first_target.get("id", "") if isinstance(first_target, dict) else "",
         "is_deleted": bool(annotation.get("isDeleted", False)),
         "data": _as_json(annotation),
         "created_at": annotation["createdAt"],

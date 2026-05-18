@@ -6,15 +6,23 @@ from app.models.user import (
     KnowledgeProfileSummary,
     LoginUserRequest,
     RegisterUserRequest,
+    SaveKnowledgeProfileRequest,
     UserKnowledgeProfile,
+    UserKnowledgeProfileListItem,
+    UserKnowledgeProfileRecord,
     UserProfile,
 )
 from app.models.usage import TokenUsageSummary
 from app.services.auth_dependency import get_current_user
 from app.services.user_service import (
+    delete_user_knowledge_profile_record,
+    get_user_knowledge_profile_record,
     get_knowledge_profile_summary,
+    list_user_knowledge_profile_summaries,
     login_user,
     register_user,
+    save_user_knowledge_profile_record,
+    select_user_knowledge_profile_record,
     update_user_knowledge_profile,
 )
 from app.services.usage_service import get_user_token_usage_summary
@@ -80,6 +88,45 @@ def put_user_knowledge_profile(
     current_user: UserProfile = Depends(get_current_user),
 ):
     return update_user_knowledge_profile(current_user.id, knowledge_profile)
+
+
+@router.get("/me/knowledge-profiles", response_model=list[UserKnowledgeProfileListItem])
+def list_user_knowledge_profiles(
+    current_user: UserProfile = Depends(get_current_user),
+):
+    return list_user_knowledge_profile_summaries(current_user.id)
+
+
+@router.get("/me/knowledge-profiles/{profile_id}", response_model=UserKnowledgeProfileRecord)
+def read_user_knowledge_profile(
+    profile_id: str,
+    current_user: UserProfile = Depends(get_current_user),
+):
+    return get_user_knowledge_profile_record(current_user.id, profile_id)
+
+
+@router.put("/me/knowledge-profiles", response_model=UserKnowledgeProfileRecord)
+def put_user_knowledge_profile_record(
+    request: SaveKnowledgeProfileRequest,
+    current_user: UserProfile = Depends(get_current_user),
+):
+    return save_user_knowledge_profile_record(current_user.id, request)
+
+
+@router.post("/me/knowledge-profiles/{profile_id}/select", response_model=UserProfile)
+def select_user_knowledge_profile(
+    profile_id: str,
+    current_user: UserProfile = Depends(get_current_user),
+):
+    return select_user_knowledge_profile_record(current_user.id, profile_id)
+
+
+@router.delete("/me/knowledge-profiles/{profile_id}", response_model=UserKnowledgeProfileListItem)
+def delete_user_knowledge_profile(
+    profile_id: str,
+    current_user: UserProfile = Depends(get_current_user),
+):
+    return delete_user_knowledge_profile_record(current_user.id, profile_id)
 
 
 @router.get("/me/knowledge-summary", response_model=KnowledgeProfileSummary)

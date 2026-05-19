@@ -7,6 +7,8 @@ type RichAiTextProps = {
   className?: string;
 };
 
+type RichAiInlineTextProps = RichAiTextProps;
+
 type InlineSegment = {
   type: "text" | "bold" | "code" | "math";
   value: string;
@@ -46,16 +48,60 @@ const latexSymbolMap: Record<string, string> = {
   "\\phi": "φ",
   "\\Phi": "Φ",
   "\\varphi": "φ",
+  "\\varpi": "ϖ",
+  "\\varsigma": "ς",
   "\\chi": "χ",
   "\\psi": "ψ",
   "\\Psi": "Ψ",
   "\\omega": "ω",
   "\\Omega": "Ω",
+  "\\ell": "ℓ",
+  "\\hbar": "ℏ",
+  "\\aleph": "ℵ",
+  "\\beth": "ℶ",
+  "\\gimel": "ℷ",
+  "\\daleth": "ℸ",
+  "\\Re": "ℜ",
+  "\\Im": "ℑ",
+  "\\wp": "℘",
+  "\\mathbb{A}": "𝔸",
+  "\\mathbb{B}": "𝔹",
   "\\mathbb{R}": "ℝ",
   "\\mathbb{N}": "ℕ",
   "\\mathbb{Z}": "ℤ",
   "\\mathbb{Q}": "ℚ",
   "\\mathbb{C}": "ℂ",
+  "\\mathbb{D}": "𝔻",
+  "\\mathbb{E}": "𝔼",
+  "\\mathbb{F}": "𝔽",
+  "\\mathbb{G}": "𝔾",
+  "\\mathbb{H}": "ℍ",
+  "\\mathbb{I}": "𝕀",
+  "\\mathbb{J}": "𝕁",
+  "\\mathbb{K}": "𝕂",
+  "\\mathbb{L}": "𝕃",
+  "\\mathbb{M}": "𝕄",
+  "\\mathbb{O}": "𝕆",
+  "\\mathbb{P}": "ℙ",
+  "\\mathbb{S}": "𝕊",
+  "\\mathbb{T}": "𝕋",
+  "\\mathbb{U}": "𝕌",
+  "\\mathbb{V}": "𝕍",
+  "\\mathbb{W}": "𝕎",
+  "\\mathbb{X}": "𝕏",
+  "\\mathbb{Y}": "𝕐",
+  "\\mathbb{0}": "𝟘",
+  "\\mathbb{1}": "𝟙",
+  "\\mathbb{2}": "𝟚",
+  "\\mathbb{3}": "𝟛",
+  "\\mathbb{4}": "𝟜",
+  "\\mathbb{5}": "𝟝",
+  "\\mathbb{6}": "𝟞",
+  "\\mathbb{7}": "𝟟",
+  "\\mathbb{8}": "𝟠",
+  "\\mathbb{9}": "𝟡",
+  "\\mathbbm{1}": "𝟙",
+  "\\mathds{1}": "𝟙",
   "\\mathcal{A}": "𝒜",
   "\\mathcal{B}": "ℬ",
   "\\mathcal{C}": "𝒞",
@@ -84,14 +130,35 @@ const latexSymbolMap: Record<string, string> = {
   "\\mathcal{Z}": "𝒵",
   "\\leq": "≤",
   "\\le": "≤",
+  "\\leqq": "≦",
   "\\geq": "≥",
   "\\ge": "≥",
+  "\\geqq": "≧",
   "\\neq": "≠",
   "\\ne": "≠",
+  "\\nleq": "≰",
+  "\\ngeq": "≱",
   "\\approx": "≈",
+  "\\cong": "≅",
   "\\simeq": "≃",
   "\\equiv": "≡",
+  "\\asymp": "≍",
+  "\\doteq": "≐",
   "\\sim": "~",
+  "\\lesssim": "≲",
+  "\\gtrsim": "≳",
+  "\\ll": "≪",
+  "\\gg": "≫",
+  "\\prec": "≺",
+  "\\succ": "≻",
+  "\\preceq": "≼",
+  "\\succeq": "≽",
+  "\\models": "⊨",
+  "\\vdash": "⊢",
+  "\\dashv": "⊣",
+  "\\bowtie": "⋈",
+  "\\lt": "<",
+  "\\gt": ">",
   "\\propto": "∝",
   "\\infty": "∞",
   "\\times": "×",
@@ -103,93 +170,104 @@ const latexSymbolMap: Record<string, string> = {
   "\\sum": "∑",
   "\\prod": "∏",
   "\\int": "∫",
+  "\\iint": "∬",
+  "\\iiint": "∭",
+  "\\oint": "∮",
   "\\partial": "∂",
   "\\nabla": "∇",
   "\\forall": "∀",
   "\\exists": "∃",
   "\\in": "∈",
   "\\notin": "∉",
+  "\\ni": "∋",
   "\\subseteq": "⊆",
   "\\subset": "⊂",
   "\\supseteq": "⊇",
   "\\supset": "⊃",
+  "\\subsetneq": "⊊",
+  "\\supsetneq": "⊋",
+  "\\nsubseteq": "⊈",
+  "\\nsupseteq": "⊉",
   "\\cup": "∪",
   "\\cap": "∩",
+  "\\setminus": "∖",
+  "\\backslash": "\\",
+  "\\mid": "|",
+  "\\nmid": "∤",
   "\\emptyset": "∅",
   "\\varnothing": "∅",
   "\\angle": "∠",
   "\\perp": "⊥",
   "\\parallel": "∥",
+  "\\nparallel": "∦",
+  "\\langle": "⟨",
+  "\\rangle": "⟩",
+  "\\lceil": "⌈",
+  "\\rceil": "⌉",
+  "\\lfloor": "⌊",
+  "\\rfloor": "⌋",
   "\\rightarrow": "→",
   "\\Rightarrow": "⇒",
   "\\leftarrow": "←",
   "\\Leftarrow": "⇐",
   "\\leftrightarrow": "↔",
   "\\Leftrightarrow": "⇔",
+  "\\longrightarrow": "⟶",
+  "\\Longrightarrow": "⟹",
+  "\\longleftarrow": "⟵",
+  "\\Longleftarrow": "⟸",
+  "\\longleftrightarrow": "⟷",
+  "\\Longleftrightarrow": "⟺",
+  "\\uparrow": "↑",
+  "\\Uparrow": "⇑",
+  "\\downarrow": "↓",
+  "\\Downarrow": "⇓",
+  "\\updownarrow": "↕",
+  "\\Updownarrow": "⇕",
+  "\\nearrow": "↗",
+  "\\searrow": "↘",
+  "\\swarrow": "↙",
+  "\\nwarrow": "↖",
+  "\\hookrightarrow": "↪",
+  "\\hookleftarrow": "↩",
+  "\\rightharpoonup": "⇀",
+  "\\rightharpoondown": "⇁",
+  "\\leftharpoonup": "↼",
+  "\\leftharpoondown": "↽",
   "\\to": "→",
   "\\mapsto": "↦",
   "\\implies": "⇒",
   "\\iff": "⇔",
   "\\land": "∧",
+  "\\wedge": "∧",
   "\\lor": "∨",
+  "\\vee": "∨",
   "\\neg": "¬",
+  "\\oplus": "⊕",
+  "\\ominus": "⊖",
+  "\\otimes": "⊗",
+  "\\oslash": "⊘",
+  "\\odot": "⊙",
+  "\\bigoplus": "⨁",
+  "\\bigotimes": "⨂",
+  "\\circ": "∘",
+  "\\bullet": "∙",
+  "\\star": "⋆",
+  "\\ast": "∗",
+  "\\triangle": "△",
+  "\\Box": "□",
+  "\\square": "□",
+  "\\Diamond": "◇",
+  "\\therefore": "∴",
+  "\\because": "∵",
+  "\\degree": "°",
+  "\\prime": "′",
+  "\\doubleprime": "″",
+  "\\dots": "…",
   "\\cdots": "⋯",
   "\\ldots": "…",
-};
-
-const superscriptMap: Record<string, string> = {
-  "0": "⁰",
-  "1": "¹",
-  "2": "²",
-  "3": "³",
-  "4": "⁴",
-  "5": "⁵",
-  "6": "⁶",
-  "7": "⁷",
-  "8": "⁸",
-  "9": "⁹",
-  "+": "⁺",
-  "-": "⁻",
-  "=": "⁼",
-  "(": "⁽",
-  ")": "⁾",
-  n: "ⁿ",
-  i: "ⁱ",
-};
-
-const subscriptMap: Record<string, string> = {
-  "0": "₀",
-  "1": "₁",
-  "2": "₂",
-  "3": "₃",
-  "4": "₄",
-  "5": "₅",
-  "6": "₆",
-  "7": "₇",
-  "8": "₈",
-  "9": "₉",
-  "+": "₊",
-  "-": "₋",
-  "=": "₌",
-  "(": "₍",
-  ")": "₎",
-  a: "ₐ",
-  e: "ₑ",
-  h: "ₕ",
-  i: "ᵢ",
-  j: "ⱼ",
-  k: "ₖ",
-  l: "ₗ",
-  m: "ₘ",
-  n: "ₙ",
-  o: "ₒ",
-  p: "ₚ",
-  r: "ᵣ",
-  s: "ₛ",
-  t: "ₜ",
-  u: "ᵤ",
-  v: "ᵥ",
-  x: "ₓ",
+  "\\vdots": "⋮",
+  "\\ddots": "⋱",
 };
 
 const latexFunctionCommands = new Set([
@@ -220,69 +298,265 @@ const latexFunctionCommands = new Set([
   "\\E",
 ]);
 
+const latexSpacingCommands = new Set([
+  "\\,",
+  "\\:",
+  "\\;",
+  "\\ ",
+  "\\quad",
+  "\\qquad",
+  "\\enspace",
+  "\\thinspace",
+  "\\medspace",
+  "\\thickspace",
+]);
+
+const latexNoopCommands = new Set([
+  "\\!",
+  "\\displaystyle",
+  "\\textstyle",
+  "\\scriptstyle",
+  "\\scriptscriptstyle",
+  "\\limits",
+  "\\nolimits",
+  "\\left",
+  "\\right",
+  "\\big",
+  "\\bigl",
+  "\\bigr",
+  "\\bigm",
+  "\\Big",
+  "\\Bigl",
+  "\\Bigr",
+  "\\Bigm",
+  "\\bigg",
+  "\\biggl",
+  "\\biggr",
+  "\\biggm",
+  "\\Bigg",
+  "\\Biggl",
+  "\\Biggr",
+  "\\Biggm",
+]);
+
+const latexTextCommands = new Set([
+  "\\text",
+  "\\textrm",
+  "\\textnormal",
+  "\\mathrm",
+  "\\operatorname",
+]);
+
+const latexStyleCommands = new Set([
+  "\\mathbf",
+  "\\boldsymbol",
+  "\\emph",
+  "\\mathit",
+  "\\mathnormal",
+  "\\mathsf",
+  "\\mathtt",
+  "\\mathfrak",
+  "\\textbf",
+  "\\textit",
+  "\\bold",
+]);
+
+const latexAccentMarks: Record<string, { mark?: string; border?: "top" | "bottom" }> = {
+  "\\bar": { border: "top" },
+  "\\overline": { border: "top" },
+  "\\underline": { border: "bottom" },
+  "\\vec": { mark: "→" },
+  "\\overrightarrow": { mark: "→" },
+  "\\hat": { mark: "^" },
+  "\\widehat": { mark: "^" },
+  "\\tilde": { mark: "~" },
+  "\\widetilde": { mark: "~" },
+  "\\dot": { mark: "·" },
+  "\\ddot": { mark: "··" },
+  "\\check": { mark: "ˇ" },
+  "\\breve": { mark: "˘" },
+  "\\acute": { mark: "´" },
+  "\\grave": { mark: "`" },
+};
+
+const latexNegatedSymbolMap: Record<string, string> = {
+  "\\in": "∉",
+  "\\ni": "∌",
+  "\\subset": "⊄",
+  "\\subseteq": "⊈",
+  "\\supset": "⊅",
+  "\\supseteq": "⊉",
+  "\\equiv": "≢",
+  "\\approx": "≉",
+  "\\cong": "≇",
+  "\\sim": "≁",
+  "\\lt": "≮",
+  "\\le": "≰",
+  "\\leq": "≰",
+  "\\gt": "≯",
+  "\\ge": "≱",
+  "\\geq": "≱",
+  "\\mid": "∤",
+  "\\parallel": "∦",
+};
+
+const latexNegatedCharacterMap: Record<string, string> = {
+  "=": "≠",
+  "<": "≮",
+  ">": "≯",
+};
+
+const latexEnvironmentDelimiters: Record<string, { open: string; close: string }> = {
+  cases: { open: "{ ", close: "" },
+  matrix: { open: "", close: "" },
+  smallmatrix: { open: "", close: "" },
+  pmatrix: { open: "(", close: ")" },
+  bmatrix: { open: "[", close: "]" },
+  Bmatrix: { open: "{", close: "}" },
+  vmatrix: { open: "|", close: "|" },
+  Vmatrix: { open: "‖", close: "‖" },
+  array: { open: "", close: "" },
+};
+
+const namedHtmlEntityMap: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  quot: '"',
+  nbsp: " ",
+  lt: "<",
+  gt: ">",
+  Alpha: "Α",
+  Beta: "Β",
+  Gamma: "Γ",
+  Delta: "Δ",
+  Epsilon: "Ε",
+  Zeta: "Ζ",
+  Eta: "Η",
+  Theta: "Θ",
+  Iota: "Ι",
+  Kappa: "Κ",
+  Lambda: "Λ",
+  Mu: "Μ",
+  Nu: "Ν",
+  Xi: "Ξ",
+  Omicron: "Ο",
+  Pi: "Π",
+  Rho: "Ρ",
+  Sigma: "Σ",
+  Tau: "Τ",
+  Upsilon: "Υ",
+  Phi: "Φ",
+  Chi: "Χ",
+  Psi: "Ψ",
+  Omega: "Ω",
+  alpha: "α",
+  beta: "β",
+  gamma: "γ",
+  delta: "δ",
+  epsilon: "ε",
+  zeta: "ζ",
+  eta: "η",
+  theta: "θ",
+  iota: "ι",
+  kappa: "κ",
+  lambda: "λ",
+  mu: "μ",
+  nu: "ν",
+  xi: "ξ",
+  omicron: "ο",
+  pi: "π",
+  rho: "ρ",
+  sigma: "σ",
+  tau: "τ",
+  upsilon: "υ",
+  phi: "φ",
+  chi: "χ",
+  psi: "ψ",
+  omega: "ω",
+  le: "≤",
+  ge: "≥",
+  ne: "≠",
+  asymp: "≈",
+  approx: "≈",
+  equiv: "≡",
+  times: "×",
+  divide: "÷",
+  plusmn: "±",
+  minus: "−",
+  infin: "∞",
+  sum: "∑",
+  prod: "∏",
+  int: "∫",
+  part: "∂",
+  nabla: "∇",
+  forall: "∀",
+  exist: "∃",
+  exists: "∃",
+  isin: "∈",
+  notin: "∉",
+  sub: "⊂",
+  sup: "⊃",
+  sube: "⊆",
+  supe: "⊇",
+  cup: "∪",
+  cap: "∩",
+  empty: "∅",
+  rarr: "→",
+  larr: "←",
+  harr: "↔",
+  rArr: "⇒",
+  lArr: "⇐",
+  hArr: "⇔",
+  deg: "°",
+  prime: "′",
+  Prime: "″",
+  micro: "μ",
+};
+
 type LatexReadResult = {
   value: string;
   end: number;
 };
 
-function convertScript(text: string, map: Record<string, string>) {
-  return text
-    .split("")
-    .map((character) => map[character] ?? character)
-    .join("");
+function decodeHtmlCodePoint(codePoint: number, fallback: string) {
+  return Number.isFinite(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+    ? String.fromCodePoint(codePoint)
+    : fallback;
+}
+
+function decodeCommonHtmlEntities(text: string) {
+  return text.replace(
+    /&(#x[0-9a-fA-F]+|#\d+|[A-Za-z]+);/g,
+    (entity, body: string) => {
+      if (body.startsWith("#x")) {
+        return decodeHtmlCodePoint(Number.parseInt(body.slice(2), 16), entity);
+      }
+
+      if (body.startsWith("#")) {
+        return decodeHtmlCodePoint(Number.parseInt(body.slice(1), 10), entity);
+      }
+
+      return namedHtmlEntityMap[body] ?? entity;
+    },
+  );
 }
 
 function stripLatexWrappers(text: string) {
   return text
+    .replace(/\\(?:left|right)\./g, "")
     .replace(/\\left(?![A-Za-z])/g, "")
     .replace(/\\right(?![A-Za-z])/g, "")
+    .replace(/\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|limits|nolimits)\b/g, "")
     .replace(/\\,/g, " ")
     .replace(/\\;/g, " ")
     .replace(/\\:/g, " ")
     .replace(/\\!/g, "")
     .replace(/\\text\{([^{}]*)\}/g, "$1")
+    .replace(/\\textrm\{([^{}]*)\}/g, "$1")
+    .replace(/\\textnormal\{([^{}]*)\}/g, "$1")
     .replace(/\\mathrm\{([^{}]*)\}/g, "$1")
-    .replace(/\\operatorname\{([^{}]*)\}/g, "$1");
-}
-
-function convertLatexMath(rawText: string) {
-  let text = stripLatexWrappers(rawText.trim());
-
-  text = text
-    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, "($1)/($2)")
-    .replace(/\\sqrt\{([^{}]+)\}/g, "√($1)")
-    .replace(/\\mathcal\s+([A-Z])/g, (_, letter: string) => {
-      return latexSymbolMap[`\\mathcal{${letter}}`] ?? letter;
-    })
-    .replace(/\\mathbb\s+([A-Z])/g, (_, letter: string) => {
-      return latexSymbolMap[`\\mathbb{${letter}}`] ?? letter;
-    });
-
-  const sortedSymbols = Object.entries(latexSymbolMap).sort(
-    ([left], [right]) => right.length - left.length,
-  );
-
-  for (const [latex, symbol] of sortedSymbols) {
-    text = text.split(latex).join(symbol);
-  }
-
-  text = text
-    .replace(/\^\{([^{}]+)\}/g, (_, value: string) =>
-      convertScript(value, superscriptMap),
-    )
-    .replace(/\^([A-Za-z0-9+\-=()])/g, (_, value: string) =>
-      convertScript(value, superscriptMap),
-    )
-    .replace(/_\{([^{}]+)\}/g, (_, value: string) =>
-      convertScript(value, subscriptMap),
-    )
-    .replace(/_([A-Za-z0-9+\-=()])/g, (_, value: string) =>
-      convertScript(value, subscriptMap),
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text;
+    .replace(/\\operatorname\{([^{}]*)\}/g, "$1")
+    .replace(/\\(?:mathbf|boldsymbol|emph|mathit|mathnormal|mathsf|mathtt|mathfrak|textbf|textit)\{([^{}]*)\}/g, "$1");
 }
 
 function skipLatexWhitespace(text: string, start: number) {
@@ -409,10 +683,10 @@ function readLatexAtom(text: string, start: number): LatexReadResult {
 }
 
 function normalizeLatexForRender(rawText: string) {
-  return stripLatexWrappers(rawText.trim())
+  return stripLatexWrappers(decodeCommonHtmlEntities(rawText).trim())
     .replace(/\\begin\{(?:aligned|align\*?|equation\*?|gather\*?|split)\}/g, "")
     .replace(/\\end\{(?:aligned|align\*?|equation\*?|gather\*?|split)\}/g, "")
-    .replace(/&/g, "")
+    .replace(/\s*&\s*/g, " ")
     .replace(/[ \t]+/g, " ");
 }
 
@@ -514,12 +788,43 @@ function renderLatexNodes(
         const command = commandMatch[0];
         let nextCursor = cursor + command.length;
 
-        if (
-          command === "\\quad" ||
-          command === "\\qquad" ||
-          command === "\\enspace"
-        ) {
-          pushText(command === "\\qquad" ? "    " : "  ");
+        if (latexSpacingCommands.has(command)) {
+          pushText(
+            command === "\\qquad" ? "    " : command === "\\," ? " " : "  ",
+          );
+          cursor = nextCursor;
+          continue;
+        }
+
+        if (latexNoopCommands.has(command)) {
+          cursor = nextCursor;
+          continue;
+        }
+
+        if (command === "\\not") {
+          nextCursor = skipLatexWhitespace(text, nextCursor);
+          const nextCommandMatch = text.slice(nextCursor).match(/^\\[A-Za-z]+/);
+
+          if (nextCommandMatch) {
+            const nextCommand = nextCommandMatch[0];
+            const negatedSymbol = latexNegatedSymbolMap[nextCommand];
+
+            if (negatedSymbol) {
+              pushText(negatedSymbol);
+              cursor = nextCursor + nextCommand.length;
+              continue;
+            }
+          }
+
+          const negatedCharacter = latexNegatedCharacterMap[text[nextCursor]];
+
+          if (negatedCharacter) {
+            pushText(negatedCharacter);
+            cursor = nextCursor + 1;
+            continue;
+          }
+
+          pushText("¬");
           cursor = nextCursor;
           continue;
         }
@@ -574,9 +879,11 @@ function renderLatexNodes(
             nextCursor = skipLatexWhitespace(text, rootIndex.end);
           }
 
-          const radicand = readBalancedLatexGroup(text, nextCursor);
+          const radicand =
+            readBalancedLatexGroup(text, nextCursor) ||
+            readLatexAtom(text, nextCursor);
 
-          if (radicand) {
+          if (radicand.value) {
             const sqrtKey = nextKey();
 
             pushElement(
@@ -608,85 +915,236 @@ function renderLatexNodes(
           }
         }
 
-        if (
-          command === "\\text" ||
-          command === "\\mathrm" ||
-          command === "\\operatorname"
-        ) {
+        if (command === "\\binom") {
           nextCursor = skipLatexWhitespace(text, nextCursor);
-          const group = readBalancedLatexGroup(text, nextCursor);
+          const numerator = readBalancedLatexGroup(text, nextCursor);
 
-          if (group) {
+          if (numerator) {
+            nextCursor = skipLatexWhitespace(text, numerator.end);
+            const denominator = readBalancedLatexGroup(text, nextCursor);
+
+            if (denominator) {
+              const binomKey = nextKey();
+
+              pushElement(
+                <span
+                  key={binomKey}
+                  className="mx-0.5 inline-flex items-center align-middle"
+                >
+                  <span className="text-[1.35em] leading-none">(</span>
+                  <span className="inline-flex flex-col items-center text-[0.9em] leading-tight">
+                    <span>
+                      {renderLatexNodes(
+                        numerator.value,
+                        `${binomKey}-top`,
+                        display,
+                      )}
+                    </span>
+                    <span>
+                      {renderLatexNodes(
+                        denominator.value,
+                        `${binomKey}-bottom`,
+                        display,
+                      )}
+                    </span>
+                  </span>
+                  <span className="text-[1.35em] leading-none">)</span>
+                </span>,
+              );
+              cursor = denominator.end;
+              continue;
+            }
+          }
+        }
+
+        if (command === "\\overset" || command === "\\underset") {
+          nextCursor = skipLatexWhitespace(text, nextCursor);
+          const annotation =
+            readBalancedLatexGroup(text, nextCursor) ||
+            readLatexAtom(text, nextCursor);
+
+          if (annotation.value) {
+            nextCursor = skipLatexWhitespace(text, annotation.end);
+            const base =
+              readBalancedLatexGroup(text, nextCursor) ||
+              readLatexAtom(text, nextCursor);
+
+            if (base.value) {
+              const stackKey = nextKey();
+              const annotationNode = (
+                <span className="text-[0.68em] leading-none">
+                  {renderLatexNodes(
+                    annotation.value,
+                    `${stackKey}-annotation`,
+                    display,
+                  )}
+                </span>
+              );
+              const baseNode = (
+                <span>
+                  {renderLatexNodes(base.value, `${stackKey}-base`, display)}
+                </span>
+              );
+
+              pushElement(
+                <span
+                  key={stackKey}
+                  className="mx-0.5 inline-flex flex-col items-center align-middle leading-tight"
+                >
+                  {command === "\\overset" ? annotationNode : baseNode}
+                  {command === "\\overset" ? baseNode : annotationNode}
+                </span>,
+              );
+              cursor = base.end;
+              continue;
+            }
+          }
+        }
+
+        if (latexTextCommands.has(command)) {
+          nextCursor = skipLatexWhitespace(text, nextCursor);
+          if (text[nextCursor] === "*") {
+            nextCursor = skipLatexWhitespace(text, nextCursor + 1);
+          }
+
+          const argument = readLatexAtom(text, nextCursor);
+
+          if (argument.value) {
+            const textKey = nextKey();
             pushElement(
-              <span key={nextKey()} className="font-sans">
-                {group.value}
+              <span key={textKey} className="font-sans">
+                {renderLatexNodes(
+                  argument.value,
+                  `${textKey}-text`,
+                  display,
+                )}
               </span>,
             );
-            cursor = group.end;
+            cursor = argument.end;
             continue;
           }
         }
 
-        if (
-          command === "\\mathbf" ||
-          command === "\\boldsymbol" ||
-          command === "\\emph"
-        ) {
+        if (latexStyleCommands.has(command)) {
           nextCursor = skipLatexWhitespace(text, nextCursor);
-          const group = readBalancedLatexGroup(text, nextCursor);
+          const argument = readLatexAtom(text, nextCursor);
 
-          if (group) {
-            pushElement(
-              <strong key={nextKey()} className="font-semibold">
-                {renderLatexNodes(group.value, `${nextKey()}-bold`, display)}
-              </strong>,
+          if (argument.value) {
+            const styleKey = nextKey();
+            const content = renderLatexNodes(
+              argument.value,
+              `${styleKey}-style`,
+              display,
             );
-            cursor = group.end;
-            continue;
-          }
-        }
 
-        if (command === "\\mathbb" || command === "\\mathcal") {
-          nextCursor = skipLatexWhitespace(text, nextCursor);
-          const group = readBalancedLatexGroup(text, nextCursor);
-
-          if (group) {
-            const value = group.value.trim();
-            const symbol = latexSymbolMap[`${command}{${value}}`];
-            pushText(symbol ?? value);
-            cursor = group.end;
+            if (
+              command === "\\mathbf" ||
+              command === "\\boldsymbol" ||
+              command === "\\textbf" ||
+              command === "\\bold"
+            ) {
+              pushElement(
+                <strong key={styleKey} className="font-semibold">
+                  {content}
+                </strong>,
+              );
+            } else if (command === "\\emph" || command === "\\textit") {
+              pushElement(
+                <em key={styleKey} className="italic">
+                  {content}
+                </em>,
+              );
+            } else {
+              pushElement(<span key={styleKey}>{content}</span>);
+            }
+            cursor = argument.end;
             continue;
           }
         }
 
         if (
-          command === "\\bar" ||
-          command === "\\overline" ||
-          command === "\\vec"
+          command === "\\mathbb" ||
+          command === "\\mathbbm" ||
+          command === "\\mathds" ||
+          command === "\\mathcal"
         ) {
+          nextCursor = skipLatexWhitespace(text, nextCursor);
+          const argument = readLatexAtom(text, nextCursor);
+
+          if (argument.value) {
+            const value = argument.value.trim();
+            const normalizedCommand =
+              command === "\\mathbbm" || command === "\\mathds"
+                ? "\\mathbb"
+                : command;
+            const symbol =
+              latexSymbolMap[`${command}{${value}}`] ??
+              latexSymbolMap[`${normalizedCommand}{${value}}`];
+            pushText(symbol ?? value);
+            cursor = argument.end;
+            continue;
+          }
+        }
+
+        if (command === "\\begin" || command === "\\end") {
           nextCursor = skipLatexWhitespace(text, nextCursor);
           const group = readBalancedLatexGroup(text, nextCursor);
 
           if (group) {
+            const environment = group.value.trim();
+            const delimiter = latexEnvironmentDelimiters[environment];
+            let endCursor = group.end;
+
+            if (command === "\\begin" && environment === "array") {
+              const layout = readBalancedLatexGroup(
+                text,
+                skipLatexWhitespace(text, endCursor),
+              );
+              endCursor = layout?.end ?? endCursor;
+            }
+
+            pushText(
+              command === "\\begin"
+                ? delimiter?.open ?? ""
+                : delimiter?.close ?? "",
+            );
+            cursor = endCursor;
+            continue;
+          }
+        }
+
+        if (latexAccentMarks[command]) {
+          nextCursor = skipLatexWhitespace(text, nextCursor);
+          const argument = readLatexAtom(text, nextCursor);
+
+          if (argument.value) {
             const accentKey = nextKey();
-            const isVector = command === "\\vec";
+            const accent = latexAccentMarks[command];
 
             pushElement(
               <span
                 key={accentKey}
                 className={`relative inline-block px-0.5 ${
-                  isVector ? "pt-1" : "border-t border-slate-700"
+                  accent.border === "top"
+                    ? "border-t border-slate-700"
+                    : accent.border === "bottom"
+                      ? "border-b border-slate-700"
+                      : "pt-1"
                 }`}
               >
-                {isVector && (
+                {accent.mark && (
                   <span className="absolute -top-1 left-0 right-0 text-center text-[0.75em] leading-none">
-                    →
+                    {accent.mark}
                   </span>
                 )}
-                {renderLatexNodes(group.value, `${accentKey}-accent`, display)}
+                {renderLatexNodes(
+                  argument.value,
+                  `${accentKey}-accent`,
+                  display,
+                )}
               </span>,
             );
-            cursor = group.end;
+            cursor = argument.end;
             continue;
           }
         }
@@ -765,12 +1223,14 @@ function renderMathExpression(
   );
 }
 
-function convertPossibleLatexText(text: string) {
-  if (!text.includes("\\")) {
-    return text;
+function renderTextSegment(text: string, key: string | number) {
+  const decodedText = decodeCommonHtmlEntities(text);
+
+  if (!decodedText.includes("\\")) {
+    return decodedText;
   }
 
-  return convertLatexMath(text);
+  return renderLatexNodes(decodedText, `inline-text-${key}`, false);
 }
 
 function findClosingDelimiter(text: string, start: number, delimiter: string) {
@@ -925,7 +1385,7 @@ function renderInline(text: string) {
       return renderMathExpression(segment.value, false, index);
     }
 
-    return <span key={index}>{convertPossibleLatexText(segment.value)}</span>;
+    return <span key={index}>{renderTextSegment(segment.value, index)}</span>;
   });
 }
 
@@ -989,6 +1449,13 @@ export function RichAiText({ text, className = "" }: RichAiTextProps) {
       {blocks.map((block, index) => renderBlock(block, index))}
     </div>
   );
+}
+
+export function RichAiInlineText({
+  text,
+  className = "",
+}: RichAiInlineTextProps) {
+  return <span className={className}>{renderInline(text)}</span>;
 }
 
 export default RichAiText;

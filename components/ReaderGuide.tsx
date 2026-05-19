@@ -28,7 +28,8 @@ type GuideStep = {
     | "hover-preview"
     | "undo"
     | "ask-ai"
-    | "delete";
+    | "delete"
+    | "bookmark";
 };
 
 const guideSteps: GuideStep[] = [
@@ -95,6 +96,13 @@ const guideSteps: GuideStep[] = [
       "Press the trash button to delete the selected annotation.",
     demo: "delete",
   },
+  {
+    selector: '[data-guide="bookmark-control"]',
+    title: "10. Add bookmarks",
+    body:
+      "Click the bookmark button or press Ctrl/Cmd+B, then click the PDF to place a bookmark at that position.",
+    demo: "bookmark",
+  },
 ];
 
 function MouseRightClickIcon() {
@@ -145,6 +153,17 @@ function renderStepDemo(step: GuideStep) {
       <div className="rounded-lg bg-slate-100 p-2 text-xs leading-5 text-slate-600">
         Selection replaced by accident. Use undo or Ctrl/Cmd+Z to restore the
         previous Selection box.
+      </div>
+    );
+  }
+
+  if (step.demo === "bookmark") {
+    return (
+      <div className="flex items-center gap-2 rounded-lg bg-slate-100 p-2 text-xs leading-5 text-slate-600">
+        <span className="rounded bg-white px-2 py-1 font-semibold text-slate-700 shadow-sm">
+          Ctrl/Cmd+B
+        </span>
+        Use the left bookmark rails to jump back later.
       </div>
     );
   }

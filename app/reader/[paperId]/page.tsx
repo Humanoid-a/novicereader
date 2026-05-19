@@ -15,7 +15,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import PdfViewer from "@/components/PdfViewer";
 import ReaderGuide from "@/components/ReaderGuide";
-import RichAiText from "@/components/RichAiText";
+import RichAiText, { RichAiInlineText } from "@/components/RichAiText";
 import {
   askAiQuestion,
   createPaperAnnotation,
@@ -82,12 +82,6 @@ import type { QuestionAnswerTurn, QuestionConversation } from "@/types/questions
 import type { UserKnowledgeProfile, UserProfile } from "@/types/user";
 import type { KnowledgeProfilePreset } from "@/lib/knowledgeProfilePresets";
 
-type SelectionSnapshot = {
-  targets: AnnotationTarget[];
-  currentSelectionId: string | null;
-  selectedAnnotationId: string | null;
-};
-
 type ReaderProfileForm = {
   backgroundSummary: string;
   knownDomainsText: string;
@@ -95,6 +89,19 @@ type ReaderProfileForm = {
 };
 
 type ReaderProfileDialogMode = "edit" | "new";
+
+type ReaderBookmark = {
+  id: string;
+  ratio: number;
+  createdAt: string;
+};
+
+type SelectionSnapshot = {
+  targets: AnnotationTarget[];
+  currentSelectionId: string | null;
+  selectedAnnotationId: string | null;
+  bookmarks: ReaderBookmark[];
+};
 
 function joinProfileList(values: string[]) {
   return values.join("\n");
@@ -447,6 +454,10 @@ function getAnnotationResponseSections(annotation: AiAnnotation | null) {
     );
 }
 
+function normalizeAiDisplayText(text: string | null | undefined) {
+  return (text ?? "").trim();
+}
+
 function getCollapsedAiResponseSectionsForAnnotation(
   annotation: AiAnnotation | null
 ): Record<AiAnnotationResponseKind, boolean> {
@@ -655,6 +666,11 @@ function getAiExplanationEmptyMessage(selection: AnnotationTarget | null) {
 const PDF_ZOOM_MIN = 0.5;
 const PDF_ZOOM_MAX = 1.6;
 const PDF_ZOOM_STEP = 0.1;
+const PDF_BOOKMARK_STORAGE_PREFIX = "novicereader:pdf-bookmarks:v1";
+const PDF_BOOKMARK_CURSOR_MAX_AGE_MS = 8000;
+const PDF_BOOKMARK_LOCAL_RAIL_FALLBACK_LEFT_PX = 24;
+const PDF_BOOKMARK_LOCAL_RAIL_GLOBAL_GAP_PX = 24;
+const PDF_BOOKMARK_LOCAL_RAIL_RIGHT_PADDING_PX = 24;
 const GUIDE_DEMO_REGION_IMAGE_SRC = "/guide/demo-region.png";
 const GUIDE_DEMO_CREATED_AT = "2026-01-01T00:00:00.000Z";
 const GUIDE_DEMO_TEXT =
@@ -710,6 +726,124 @@ function clampPdfZoom(zoom: number) {
   return Math.min(Math.max(zoom, PDF_ZOOM_MIN), PDF_ZOOM_MAX);
 }
 
+function clampBookmarkRatio(ratio: number) {
+  return Math.min(Math.max(ratio, 0), 1);
+}
+
+function clampPdfBookmarkLocalRailLeft(
+  left: number,
+  scrollContainer: HTMLElement,
+  globalRail: HTMLElement | null
+) {
+  const scrollContainerRect = scrollContainer.getBoundingClientRect();
+  const globalRailRect = globalRail?.getBoundingClientRect();
+  const globalRailContentLeft = globalRailRect
+    ? scrollContainer.scrollLeft +
+      globalRailRect.left +
+      globalRailRect.width / 2 -
+      scrollContainerRect.left
+    : 0;
+  const minLeft = Math.max(
+    PDF_BOOKMARK_LOCAL_RAIL_FALLBACK_LEFT_PX,
+    globalRailContentLeft + PDF_BOOKMARK_LOCAL_RAIL_GLOBAL_GAP_PX
+  );
+  const maxLeft = Math.max(
+    scrollContainer.scrollWidth - PDF_BOOKMARK_LOCAL_RAIL_RIGHT_PADDING_PX,
+    minLeft
+  );
+
+  return Math.min(Math.max(left, minLeft), maxLeft);
+}
+
+function getPdfBookmarkLocalRailLeft(
+  scrollContainer: HTMLElement,
+  contentElement: HTMLElement | null,
+  globalRail: HTMLElement | null
+) {
+  const pageElement = contentElement?.querySelector<HTMLElement>(
+    "[data-page-number]"
+  );
+  const scrollContainerRect = scrollContainer.getBoundingClientRect();
+  const pageRect = pageElement?.getBoundingClientRect();
+  const pageEdgeLeft = pageRect
+    ? scrollContainer.scrollLeft + pageRect.left - scrollContainerRect.left
+    : PDF_BOOKMARK_LOCAL_RAIL_FALLBACK_LEFT_PX;
+
+  return clampPdfBookmarkLocalRailLeft(
+    pageEdgeLeft,
+    scrollContainer,
+    globalRail
+  );
+}
+
+function easeOutBookmarkScroll(progress: number) {
+  return 1 - Math.pow(1 - progress, 3);
+}
+
+function getFastBookmarkScrollDuration(distance: number) {
+  return Math.min(Math.max(distance / 10, 70), 150);
+}
+
+function getPdfBookmarkStorageKey({
+  paper,
+  isGuest,
+  isLocal,
+}: {
+  paper: PaperWithUrls;
+  isGuest: boolean;
+  isLocal: boolean;
+}) {
+  const scope = isGuest ? "guest" : isLocal ? "local" : paper.userId;
+
+  return `${PDF_BOOKMARK_STORAGE_PREFIX}:${scope}:${paper.id}`;
+}
+
+function parseStoredPdfBookmarks(rawBookmarks: string | null) {
+  if (!rawBookmarks) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawBookmarks);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((bookmark): ReaderBookmark | null => {
+        if (
+          !bookmark ||
+          typeof bookmark.id !== "string" ||
+          typeof bookmark.ratio !== "number" ||
+          typeof bookmark.createdAt !== "string" ||
+          !Number.isFinite(bookmark.ratio)
+        ) {
+          return null;
+        }
+
+        return {
+          id: bookmark.id,
+          ratio: clampBookmarkRatio(bookmark.ratio),
+          createdAt: bookmark.createdAt,
+        };
+      })
+      .filter((bookmark): bookmark is ReaderBookmark => bookmark !== null);
+  } catch {
+    return [];
+  }
+}
+
+function copyPdfBookmarks(bookmarks: ReaderBookmark[]) {
+  return bookmarks.map((bookmark) => ({ ...bookmark }));
+}
+
+function getPdfBookmarkSignature(bookmarks: ReaderBookmark[]) {
+  return bookmarks
+    .map((bookmark) => `${bookmark.id}:${bookmark.ratio}:${bookmark.createdAt}`)
+    .join("|");
+}
+
 function isGuideDemoAnnotation(annotation: AiAnnotation | null) {
   return Boolean(annotation?.id.startsWith("guide-demo-annotation"));
 }
@@ -752,6 +886,8 @@ export default function ReaderPage() {
   const router = useRouter();
   const paperId = params.paperId;
   const pdfScrollContainerRef = useRef<HTMLElement | null>(null);
+  const pdfBookmarkGlobalRailRef = useRef<HTMLDivElement | null>(null);
+  const pdfBookmarkContentRef = useRef<HTMLDivElement | null>(null);
   const pdfZoomCommitTimeoutRef = useRef<number | null>(null);
   const pdfGestureStartZoomRef = useRef(1);
   const pdfVisualZoomRef = useRef(1);
@@ -760,6 +896,17 @@ export default function ReaderPage() {
     top: number;
     visualZoom: number;
   } | null>(null);
+  const bookmarkHoverScrollPositionRef = useRef<{
+    left: number;
+    top: number;
+    visualZoom: number;
+  } | null>(null);
+  const pdfBookmarkScrollAnimationRef = useRef<number | null>(null);
+  const pdfCursorBookmarkPositionRef = useRef<{
+    ratio: number;
+    updatedAt: number;
+  } | null>(null);
+  const pdfBookmarkPlacementPointerYRef = useRef<number | null>(null);
   const selectionPreviewCloseTimeoutRef = useRef<number | null>(null);
   const multiselectToastTimeoutRef = useRef<number | null>(null);
   const isShiftMultiselectKeyDownRef = useRef(false);
@@ -823,6 +970,20 @@ export default function ReaderPage() {
   const [pdfNumPages, setPdfNumPages] = useState(0);
   const [pdfZoom, setPdfZoom] = useState(1);
   const [pdfVisualZoom, setPdfVisualZoom] = useState(1);
+  const [pdfBookmarks, setPdfBookmarks] = useState<ReaderBookmark[]>([]);
+  const [previewedPdfBookmarkId, setPreviewedPdfBookmarkId] =
+    useState<string | null>(null);
+  const [isPdfBookmarkPlacementActive, setIsPdfBookmarkPlacementActive] =
+    useState(false);
+  const [pdfBookmarkPlacementLineTop, setPdfBookmarkPlacementLineTop] =
+    useState<number | null>(null);
+  const [pdfBookmarkDocumentHeight, setPdfBookmarkDocumentHeight] =
+    useState(0);
+  const [pdfBookmarkLocalRailLeft, setPdfBookmarkLocalRailLeft] = useState(
+    PDF_BOOKMARK_LOCAL_RAIL_FALLBACK_LEFT_PX
+  );
+  const [loadedPdfBookmarkStorageKey, setLoadedPdfBookmarkStorageKey] =
+    useState("");
   const [targetToReveal, setTargetToReveal] = useState<{
     targetId: string;
     nonce: number;
@@ -1052,6 +1213,130 @@ useEffect(() => {
     window.removeEventListener("beforeunload", warnBeforeLeaving);
   };
 }, [isGuestMode, isLocalPaper, paper]);
+
+useEffect(() => {
+  let isActive = true;
+
+  const frameId = window.requestAnimationFrame(() => {
+    if (!isActive) {
+      return;
+    }
+
+    if (!paper) {
+      setPdfBookmarks([]);
+      setLoadedPdfBookmarkStorageKey("");
+      return;
+    }
+
+    const storageKey = getPdfBookmarkStorageKey({
+      paper,
+      isGuest: isGuestMode,
+      isLocal: isLocalPaper,
+    });
+
+    try {
+      setPdfBookmarks(
+        parseStoredPdfBookmarks(window.localStorage.getItem(storageKey))
+      );
+    } catch {
+      setPdfBookmarks([]);
+    }
+
+    setLoadedPdfBookmarkStorageKey(storageKey);
+    bookmarkHoverScrollPositionRef.current = null;
+    pdfCursorBookmarkPositionRef.current = null;
+  });
+
+  return () => {
+    isActive = false;
+    window.cancelAnimationFrame(frameId);
+  };
+}, [isGuestMode, isLocalPaper, paper]);
+
+useEffect(() => {
+  if (!loadedPdfBookmarkStorageKey) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      loadedPdfBookmarkStorageKey,
+      JSON.stringify(pdfBookmarks)
+    );
+  } catch (error) {
+    console.error("Failed to save PDF bookmarks", error);
+  }
+}, [loadedPdfBookmarkStorageKey, pdfBookmarks]);
+
+useEffect(() => {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer) {
+    setPdfBookmarkDocumentHeight(0);
+    setPdfBookmarkLocalRailLeft(PDF_BOOKMARK_LOCAL_RAIL_FALLBACK_LEFT_PX);
+    return;
+  }
+
+  const activeScrollContainer = scrollContainer;
+  let animationFrame: number | null = null;
+  const timeoutIds: number[] = [];
+
+  function updateBookmarkDocumentHeight() {
+    animationFrame = null;
+    const nextHeight = Math.max(activeScrollContainer.scrollHeight, 0);
+    const nextLocalRailLeft = getPdfBookmarkLocalRailLeft(
+      activeScrollContainer,
+      pdfBookmarkContentRef.current,
+      pdfBookmarkGlobalRailRef.current
+    );
+
+    setPdfBookmarkDocumentHeight((currentHeight) =>
+      Math.abs(currentHeight - nextHeight) < 1 ? currentHeight : nextHeight
+    );
+    setPdfBookmarkLocalRailLeft((currentLeft) =>
+      Math.abs(currentLeft - nextLocalRailLeft) < 1
+        ? currentLeft
+        : nextLocalRailLeft
+    );
+  }
+
+  function scheduleBookmarkDocumentHeightUpdate() {
+    if (animationFrame !== null) {
+      return;
+    }
+
+    animationFrame = window.requestAnimationFrame(updateBookmarkDocumentHeight);
+  }
+
+  scheduleBookmarkDocumentHeightUpdate();
+  timeoutIds.push(
+    window.setTimeout(scheduleBookmarkDocumentHeightUpdate, 120),
+    window.setTimeout(scheduleBookmarkDocumentHeightUpdate, 500)
+  );
+
+  const resizeObserver =
+    typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(scheduleBookmarkDocumentHeightUpdate)
+      : null;
+
+  resizeObserver?.observe(activeScrollContainer);
+
+  if (pdfBookmarkContentRef.current) {
+    resizeObserver?.observe(pdfBookmarkContentRef.current);
+  }
+
+  window.addEventListener("resize", scheduleBookmarkDocumentHeightUpdate);
+
+  return () => {
+    if (animationFrame !== null) {
+      window.cancelAnimationFrame(animationFrame);
+    }
+
+    timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    resizeObserver?.disconnect();
+    window.removeEventListener("resize", scheduleBookmarkDocumentHeightUpdate);
+  };
+}, [paper?.id, pdfNumPages, pdfVisualZoom, pdfZoom]);
 
 useEffect(() => {
   if (!paper) {
@@ -1484,6 +1769,7 @@ const handleReaderGuideStepChange = useCallback(
           targets: [GUIDE_DEMO_REGION_TARGET, GUIDE_DEMO_TEXT_TARGET],
           currentSelectionId: GUIDE_DEMO_TEXT_TARGET.id,
           selectedAnnotationId: null,
+          bookmarks: copyPdfBookmarks(pdfBookmarks),
         },
       ]);
       return;
@@ -1510,6 +1796,7 @@ const handleReaderGuideStepChange = useCallback(
   [
     clearReaderGuideTimers,
     paper,
+    pdfBookmarks,
     queueReaderGuideTimer,
     revealGuideDemoTarget,
   ]
@@ -1518,12 +1805,14 @@ const handleReaderGuideStepChange = useCallback(
 function createSelectionSnapshot(
   targets: AnnotationTarget[] = selectedTargets,
   focusedTarget: AnnotationTarget | null = currentSelection,
-  annotation: AiAnnotation | null = selectedAnnotation
+  annotation: AiAnnotation | null = selectedAnnotation,
+  bookmarks: ReaderBookmark[] = pdfBookmarks
 ): SelectionSnapshot {
   return {
     targets,
     currentSelectionId: focusedTarget?.id ?? null,
     selectedAnnotationId: annotation?.id ?? null,
+    bookmarks: copyPdfBookmarks(bookmarks),
   };
 }
 
@@ -1532,6 +1821,7 @@ function getSelectionSnapshotSignature(snapshot: SelectionSnapshot) {
     getTargetSignature(snapshot.targets),
     snapshot.currentSelectionId ?? "",
     snapshot.selectedAnnotationId ?? "",
+    getPdfBookmarkSignature(snapshot.bookmarks ?? []),
   ].join("::");
 }
 
@@ -1546,6 +1836,39 @@ function rememberSelectionDisplayChange(
     annotation ?? null
   );
   const currentSnapshot = createSelectionSnapshot();
+
+  if (
+    getSelectionSnapshotSignature(currentSnapshot) ===
+    getSelectionSnapshotSignature(nextSnapshot)
+  ) {
+    return;
+  }
+
+  setSelectionFuture([]);
+
+  setSelectionHistory((current) => {
+    const latestHistoryEntry = current[current.length - 1];
+
+    if (
+      latestHistoryEntry &&
+      getSelectionSnapshotSignature(latestHistoryEntry) ===
+        getSelectionSnapshotSignature(currentSnapshot)
+    ) {
+      return current;
+    }
+
+    return [...current, currentSnapshot];
+  });
+}
+
+function rememberBookmarkDisplayChange(nextBookmarks: ReaderBookmark[]) {
+  const currentSnapshot = createSelectionSnapshot();
+  const nextSnapshot = createSelectionSnapshot(
+    selectedTargets,
+    currentSelection,
+    selectedAnnotation,
+    nextBookmarks
+  );
 
   if (
     getSelectionSnapshotSignature(currentSnapshot) ===
@@ -1643,6 +1966,9 @@ function restoreSelectionSnapshot(snapshot: SelectionSnapshot) {
   setSelectedTargets(snapshot.targets);
   setCurrentSelection(focusedTarget);
   setSelectedAnnotation(restoredAnnotation);
+  setPdfBookmarks(copyPdfBookmarks(snapshot.bookmarks ?? pdfBookmarks));
+  setPreviewedPdfBookmarkId(null);
+  bookmarkHoverScrollPositionRef.current = null;
   setAiResponseKind(restoredKind);
   setCollapsedAiResponseSections(
     getCollapsedAiResponseSectionsForAnnotation(restoredAnnotation)
@@ -1833,6 +2159,340 @@ function zoomPdfOut() {
 function resetPdfZoom() {
   setCommittedPdfZoom(1);
 }
+
+function getPdfBookmarkRatioFromPointer(event: MouseEvent<HTMLElement>) {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer || scrollContainer.scrollHeight <= 0) {
+    return null;
+  }
+
+  const scrollContainerRect = scrollContainer.getBoundingClientRect();
+  const pointerY = Math.min(
+    Math.max(event.clientY - scrollContainerRect.top, 0),
+    scrollContainer.clientHeight
+  );
+  const contentY = scrollContainer.scrollTop + pointerY;
+
+  return clampBookmarkRatio(contentY / scrollContainer.scrollHeight);
+}
+
+function getPdfBookmarkPointerY(event: MouseEvent<HTMLElement>) {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer) {
+    return null;
+  }
+
+  const scrollContainerRect = scrollContainer.getBoundingClientRect();
+
+  return Math.min(
+    Math.max(event.clientY - scrollContainerRect.top, 0),
+    scrollContainer.clientHeight
+  );
+}
+
+function rememberPdfCursorBookmarkPosition(event: MouseEvent<HTMLElement>) {
+  const ratio = getPdfBookmarkRatioFromPointer(event);
+
+  if (ratio === null) {
+    return;
+  }
+
+  pdfBookmarkPlacementPointerYRef.current = getPdfBookmarkPointerY(event);
+  pdfCursorBookmarkPositionRef.current = {
+    ratio,
+    updatedAt: Date.now(),
+  };
+
+  if (isPdfBookmarkPlacementActive) {
+    setPdfBookmarkPlacementLineTop(getPdfBookmarkLineTop(ratio));
+  }
+}
+
+function getCurrentPdfBookmarkRatio() {
+  const scrollContainer = pdfScrollContainerRef.current;
+  const cursorPosition = pdfCursorBookmarkPositionRef.current;
+
+  if (
+    cursorPosition &&
+    Date.now() - cursorPosition.updatedAt <= PDF_BOOKMARK_CURSOR_MAX_AGE_MS
+  ) {
+    return cursorPosition.ratio;
+  }
+
+  if (!scrollContainer || scrollContainer.scrollHeight <= 0) {
+    return 0;
+  }
+
+  const contentY = scrollContainer.scrollTop + scrollContainer.clientHeight * 0.45;
+
+  return clampBookmarkRatio(contentY / scrollContainer.scrollHeight);
+}
+
+function getPdfBookmarkLineTop(bookmarkRatio: number) {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer) {
+    return 0;
+  }
+
+  return clampBookmarkRatio(bookmarkRatio) * scrollContainer.scrollHeight;
+}
+
+function getPdfBookmarkScrollTop(bookmarkRatio: number) {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer) {
+    return 0;
+  }
+
+  const maxTop = Math.max(
+    scrollContainer.scrollHeight - scrollContainer.clientHeight,
+    0
+  );
+  const targetContentY = clampBookmarkRatio(bookmarkRatio) * scrollContainer.scrollHeight;
+
+  return Math.min(
+    Math.max(targetContentY - scrollContainer.clientHeight * 0.25, 0),
+    maxTop
+  );
+}
+
+function cancelPdfBookmarkScrollAnimation() {
+  if (pdfBookmarkScrollAnimationRef.current === null) {
+    return;
+  }
+
+  window.cancelAnimationFrame(pdfBookmarkScrollAnimationRef.current);
+  pdfBookmarkScrollAnimationRef.current = null;
+}
+
+function scrollToPdfBookmark(bookmark: ReaderBookmark) {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer) {
+    return;
+  }
+
+  const activeScrollContainer = scrollContainer;
+
+  cancelPdfBookmarkScrollAnimation();
+
+  const startTop = activeScrollContainer.scrollTop;
+  const nextTop = getPdfBookmarkScrollTop(bookmark.ratio);
+  const deltaTop = nextTop - startTop;
+  const distance = Math.abs(deltaTop);
+
+  if (distance < 1) {
+    return;
+  }
+
+  const duration = getFastBookmarkScrollDuration(distance);
+  const startTime = window.performance.now();
+
+  function animateBookmarkScroll(now: number) {
+    const progress = Math.min(Math.max((now - startTime) / duration, 0), 1);
+    const easedProgress = easeOutBookmarkScroll(progress);
+
+    activeScrollContainer.scrollTop = startTop + deltaTop * easedProgress;
+
+    if (progress < 1) {
+      pdfBookmarkScrollAnimationRef.current = window.requestAnimationFrame(
+        animateBookmarkScroll
+      );
+    } else {
+      pdfBookmarkScrollAnimationRef.current = null;
+    }
+  }
+
+  pdfBookmarkScrollAnimationRef.current = window.requestAnimationFrame(
+    animateBookmarkScroll
+  );
+}
+
+function addPdfBookmarkAtRatio(ratio: number) {
+  const timestamp = new Date().toISOString();
+  const nextBookmarks = [
+    ...pdfBookmarks,
+    {
+      id: createId(),
+      ratio: clampBookmarkRatio(ratio),
+      createdAt: timestamp,
+    },
+  ].sort((first, second) => first.ratio - second.ratio);
+
+  rememberBookmarkDisplayChange(nextBookmarks);
+  setPdfBookmarks(nextBookmarks);
+}
+
+function startPdfBookmarkPlacement() {
+  const ratio = getCurrentPdfBookmarkRatio();
+
+  setIsPdfBookmarkPlacementActive(true);
+  setPdfBookmarkPlacementLineTop(getPdfBookmarkLineTop(ratio));
+}
+
+function togglePdfBookmarkPlacement() {
+  if (isPdfBookmarkPlacementActive) {
+    cancelPdfBookmarkPlacement();
+    return;
+  }
+
+  startPdfBookmarkPlacement();
+}
+
+function cancelPdfBookmarkPlacement() {
+  setIsPdfBookmarkPlacementActive(false);
+  setPdfBookmarkPlacementLineTop(null);
+  pdfBookmarkPlacementPointerYRef.current = null;
+}
+
+function previewPdfBookmark(bookmark: ReaderBookmark) {
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (!scrollContainer) {
+    return;
+  }
+
+  if (bookmarkHoverScrollPositionRef.current === null) {
+    bookmarkHoverScrollPositionRef.current = {
+      left: scrollContainer.scrollLeft,
+      top: scrollContainer.scrollTop,
+      visualZoom: pdfVisualZoomRef.current,
+    };
+  }
+
+  setPreviewedPdfBookmarkId(bookmark.id);
+  scrollToPdfBookmark(bookmark);
+}
+
+function selectPdfBookmarkIcon(bookmarkId: string) {
+  setPreviewedPdfBookmarkId(bookmarkId);
+}
+
+function clearSelectedPdfBookmarkIcon(bookmarkId: string) {
+  setPreviewedPdfBookmarkId((currentId) =>
+    currentId === bookmarkId ? null : currentId
+  );
+}
+
+function restorePdfBookmarkPreview() {
+  const scrollContainer = pdfScrollContainerRef.current;
+  const previousScrollPosition = bookmarkHoverScrollPositionRef.current;
+
+  cancelPdfBookmarkScrollAnimation();
+
+  if (scrollContainer && previousScrollPosition !== null) {
+    const zoomRatio =
+      previousScrollPosition.visualZoom > 0
+        ? pdfVisualZoomRef.current / previousScrollPosition.visualZoom
+        : 1;
+
+    scrollContainer.scrollTo({
+      left: previousScrollPosition.left * zoomRatio,
+      top: previousScrollPosition.top * zoomRatio,
+      behavior: "auto",
+    });
+  }
+
+  bookmarkHoverScrollPositionRef.current = null;
+  setPreviewedPdfBookmarkId(null);
+}
+
+function jumpToPdfBookmark(bookmark: ReaderBookmark) {
+  bookmarkHoverScrollPositionRef.current = null;
+  setPreviewedPdfBookmarkId(null);
+  scrollToPdfBookmark(bookmark);
+}
+
+function removePdfBookmark(bookmarkId: string) {
+  restorePdfBookmarkPreview();
+  const nextBookmarks = pdfBookmarks.filter(
+    (bookmark) => bookmark.id !== bookmarkId
+  );
+
+  rememberBookmarkDisplayChange(nextBookmarks);
+  setPdfBookmarks(nextBookmarks);
+}
+
+function handlePdfScroll() {
+  setPreviewedPdfBookmarkId((current) => (current ? null : current));
+
+  const scrollContainer = pdfScrollContainerRef.current;
+
+  if (scrollContainer) {
+    setPdfBookmarkLocalRailLeft(
+      getPdfBookmarkLocalRailLeft(
+        scrollContainer,
+        pdfBookmarkContentRef.current,
+        pdfBookmarkGlobalRailRef.current
+      )
+    );
+  }
+
+  if (
+    isPdfBookmarkPlacementActive &&
+    pdfBookmarkPlacementPointerYRef.current !== null
+  ) {
+    if (scrollContainer) {
+      setPdfBookmarkPlacementLineTop(
+        scrollContainer.scrollTop + pdfBookmarkPlacementPointerYRef.current
+      );
+    }
+  }
+}
+
+function handlePdfBookmarkPlacementMouseDown(event: MouseEvent<HTMLElement>) {
+  if (!isPdfBookmarkPlacementActive || event.button !== 0) {
+    return;
+  }
+
+  const ratio = getPdfBookmarkRatioFromPointer(event);
+
+  if (ratio === null) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  addPdfBookmarkAtRatio(ratio);
+  cancelPdfBookmarkPlacement();
+}
+
+useEffect(() => {
+  function handlePdfBookmarkShortcut(event: KeyboardEvent) {
+    if (
+      isPdfBookmarkPlacementActive &&
+      event.key === "Escape" &&
+      !isEditableShortcutTarget(event.target)
+    ) {
+      event.preventDefault();
+      cancelPdfBookmarkPlacement();
+      return;
+    }
+
+    if (
+      event.defaultPrevented ||
+      event.altKey ||
+      event.shiftKey ||
+      event.key.toLowerCase() !== "b" ||
+      !(event.metaKey || event.ctrlKey) ||
+      isEditableShortcutTarget(event.target)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    togglePdfBookmarkPlacement();
+  }
+
+  window.addEventListener("keydown", handlePdfBookmarkShortcut);
+
+  return () => {
+    window.removeEventListener("keydown", handlePdfBookmarkShortcut);
+  };
+});
 
 function handleGuestNavigation(event: MouseEvent<HTMLAnchorElement>) {
   if (!isGuestMode) {
@@ -2830,6 +3490,10 @@ async function handleSelectionAiRequest(kind: "explain" | "summarize") {
       setSelectedAnnotation(savedAnnotation);
       setSelectedTargets(getAnnotationTargets(savedAnnotation));
       setCurrentSelection(getPrimaryAnnotationTarget(savedAnnotation));
+      setAiResponse(
+        getAnnotationResponseContent(savedAnnotation, responseKind)
+          ?.mainExplanation ?? result.explanation.mainExplanation
+      );
       setCollapsedAiResponseSections(
         getCollapsedAiResponseSectionsForAnnotation(savedAnnotation)
       );
@@ -3111,13 +3775,21 @@ async function handleAskAi() {
 
     return order[first.kind] - order[second.kind];
   });
+  const normalizedAiResponse = normalizeAiDisplayText(aiResponse);
+  const aiResponseIsAlreadyDisplayed = displayedAiResponseSections.some(
+    (section) =>
+      normalizeAiDisplayText(section.content?.mainExplanation) ===
+      normalizedAiResponse
+  );
   const hasQuestionTurns = questionTurns.length > 0;
   const shouldShowTransientAiResponse =
-    Boolean(aiResponse) &&
+    Boolean(normalizedAiResponse) &&
     !isSelectionAiBusy &&
+    !aiResponseIsAlreadyDisplayed &&
     (displayedAiResponseSections.length === 0 ||
       !activeAiResponseContent ||
-      aiResponse !== activeAiResponseContent.mainExplanation);
+      normalizedAiResponse !==
+        normalizeAiDisplayText(activeAiResponseContent.mainExplanation));
   const hasAiPanelContent =
     shouldShowTransientAiResponse ||
     displayedAiResponseSections.length > 0 ||
@@ -3165,6 +3837,16 @@ async function handleAskAi() {
   const previewedSelectionTarget =
     previewedSelectionTargetIndex >= 0
       ? selectedTargets[previewedSelectionTargetIndex]
+      : null;
+  const sortedPdfBookmarks = [...pdfBookmarks].sort(
+    (first, second) => first.ratio - second.ratio
+  );
+  const hasPdfBookmarks = sortedPdfBookmarks.length > 0;
+  const pdfBookmarkPlacementPreviewRatio =
+    isPdfBookmarkPlacementActive &&
+    pdfBookmarkPlacementLineTop !== null &&
+    pdfBookmarkDocumentHeight > 0
+      ? clampBookmarkRatio(pdfBookmarkPlacementLineTop / pdfBookmarkDocumentHeight)
       : null;
 
   if (isLoading) {
@@ -3243,6 +3925,39 @@ async function handleAskAi() {
               +
             </button>
           </div>
+
+          <div className="h-4 w-px bg-slate-200" />
+
+          <button
+            type="button"
+            data-guide="bookmark-control"
+            onClick={togglePdfBookmarkPlacement}
+            disabled={pdfNumPages === 0}
+            className={`flex h-6 items-center gap-1 rounded px-1.5 text-xs font-medium transition hover:bg-white disabled:pointer-events-none disabled:opacity-40 ${
+              isPdfBookmarkPlacementActive
+                ? "bg-white text-sky-700 shadow-sm"
+                : "text-slate-500 hover:text-slate-900"
+            }`}
+            title="Place bookmark"
+            aria-label="Place bookmark"
+            aria-pressed={isPdfBookmarkPlacementActive}
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.8"
+            >
+              <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3-6 3V5a1 1 0 0 1 1-1Z" />
+              <path d="M12 8v5" />
+              <path d="M9.5 10.5h5" />
+            </svg>
+            <span className="tabular-nums">{sortedPdfBookmarks.length}</span>
+          </button>
         </div>
 
         <div className="flex justify-self-end items-center gap-2">
@@ -3428,27 +4143,149 @@ async function handleAskAi() {
       </div>
 
       <div className="relative grid h-[calc(100vh-49px)] grid-cols-[minmax(0,1fr)_305px] gap-3 p-3">
+        <div
+          ref={pdfBookmarkGlobalRailRef}
+          className="absolute bottom-5 left-1 top-5 z-20 flex w-4 justify-center"
+          onMouseLeave={restorePdfBookmarkPreview}
+          aria-label="PDF bookmarks"
+        >
+          <div className="pointer-events-none h-full w-px rounded-full bg-slate-900/10" />
+
+          {sortedPdfBookmarks.map((bookmark, index) => (
+            <button
+              key={bookmark.id}
+              type="button"
+              onMouseEnter={() => previewPdfBookmark(bookmark)}
+              onFocus={() => previewPdfBookmark(bookmark)}
+              onBlur={restorePdfBookmarkPreview}
+              onClick={(event) => {
+                event.currentTarget.blur();
+                jumpToPdfBookmark(bookmark);
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                removePdfBookmark(bookmark.id);
+              }}
+              className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white shadow-sm ring-1 ring-slate-900/20 transition hover:bg-sky-600 focus:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-300 ${
+                previewedPdfBookmarkId === bookmark.id
+                  ? "h-3 w-3 bg-sky-600"
+                  : "h-2.5 w-2.5 bg-slate-900"
+              }`}
+              style={{ top: `${clampBookmarkRatio(bookmark.ratio) * 100}%` }}
+              title={`Bookmark ${index + 1}. Click to jump. Right-click to remove.`}
+              aria-label={`Bookmark ${index + 1}`}
+            />
+          ))}
+
+          {pdfBookmarkPlacementPreviewRatio !== null && (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-sky-500/55 bg-sky-200/25 shadow-sm ring-1 ring-sky-300/20"
+              style={{ top: `${pdfBookmarkPlacementPreviewRatio * 100}%` }}
+            />
+          )}
+        </div>
+
        <section
          ref={pdfScrollContainerRef}
          data-guide="pdf-viewer"
-         className="min-w-0 overflow-auto rounded-2xl bg-slate-200 p-2 shadow-sm"
+         onMouseMove={rememberPdfCursorBookmarkPosition}
+         onScroll={handlePdfScroll}
+         onMouseDownCapture={handlePdfBookmarkPlacementMouseDown}
+         className={`relative min-w-0 overflow-auto rounded-2xl bg-slate-200 p-2 shadow-sm ${
+           isPdfBookmarkPlacementActive ? "cursor-crosshair" : ""
+         }`}
        >
-         <PdfViewer
-  fileUrl={paper.fileUrl}
-  selectionTool={selectionTool}
-  annotations={visibleAnnotations}
-  zoom={pdfZoom}
-  visualZoom={pdfVisualZoom}
-  targetToReveal={targetToReveal}
-  currentSelection={currentSelection}
-  currentSelectionTargets={selectedTargets}
-  onPageStatusChange={handlePdfPageStatusChange}
-  onTextSelected={handleTextSelected}
-  onRegionSelected={handleRegionSelected}
-  onAnnotationContextMenu={handleAnnotationContextMenu}
-  onSelectionContextMenu={handleSelectionContextMenu}
-  onAnnotationContextMenuEmpty={clearSelection}
-/>
+        {isPdfBookmarkPlacementActive &&
+           pdfBookmarkPlacementLineTop !== null && (
+             <div
+               className="pointer-events-none absolute left-3 right-3 z-[80] -translate-y-1/2 border-t border-dashed border-sky-500/45 shadow-[0_0_0_1px_rgba(255,255,255,0.65)]"
+               style={{ top: pdfBookmarkPlacementLineTop }}
+             />
+           )}
+
+         {(hasPdfBookmarks || pdfBookmarkPlacementPreviewRatio !== null) &&
+           pdfBookmarkDocumentHeight > 0 && (
+           <div
+             aria-label="PDF bookmark document positions"
+             className="pointer-events-none absolute top-0 z-[55] w-4 -translate-x-1/2"
+             style={{
+               height: pdfBookmarkDocumentHeight,
+               left: pdfBookmarkLocalRailLeft,
+             }}
+           >
+             <div className="absolute bottom-2 left-1/2 top-2 w-px -translate-x-1/2 rounded-full bg-sky-500/10" />
+
+             {sortedPdfBookmarks.map((bookmark, index) => {
+               const markerTop = Math.min(
+                 Math.max(
+                   clampBookmarkRatio(bookmark.ratio) * pdfBookmarkDocumentHeight,
+                   8
+                 ),
+                 Math.max(pdfBookmarkDocumentHeight - 8, 8)
+               );
+
+               return (
+                 <button
+                   key={`document_${bookmark.id}`}
+                   type="button"
+                   onMouseEnter={() => selectPdfBookmarkIcon(bookmark.id)}
+                   onMouseLeave={() => clearSelectedPdfBookmarkIcon(bookmark.id)}
+                   onFocus={() => selectPdfBookmarkIcon(bookmark.id)}
+                   onBlur={() => clearSelectedPdfBookmarkIcon(bookmark.id)}
+                   onClick={(event) => {
+                     event.currentTarget.blur();
+                     jumpToPdfBookmark(bookmark);
+                   }}
+                   onContextMenu={(event) => {
+                     event.preventDefault();
+                     removePdfBookmark(bookmark.id);
+                   }}
+                   className={`pointer-events-auto absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white shadow-sm transition hover:bg-sky-600 focus:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-300 ${
+                     previewedPdfBookmarkId === bookmark.id
+                       ? "h-3 w-3 bg-sky-600"
+                       : "h-2 w-2 bg-sky-500/55"
+                   }`}
+                   style={{ top: markerTop }}
+                   title={`Bookmark ${index + 1}. Click to jump. Right-click to remove.`}
+                   aria-label={`Bookmark ${index + 1} position`}
+                 />
+               );
+             })}
+
+             {pdfBookmarkPlacementLineTop !== null && (
+               <span
+                 aria-hidden="true"
+                 className="pointer-events-none absolute left-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-dashed border-sky-500/55 bg-sky-200/25 shadow-sm ring-1 ring-sky-300/20"
+                 style={{
+                   top: Math.min(
+                     Math.max(pdfBookmarkPlacementLineTop, 8),
+                     Math.max(pdfBookmarkDocumentHeight - 8, 8)
+                   ),
+                 }}
+               />
+             )}
+           </div>
+         )}
+
+         <div ref={pdfBookmarkContentRef} className="relative">
+           <PdfViewer
+             fileUrl={paper.fileUrl}
+             selectionTool={selectionTool}
+             annotations={visibleAnnotations}
+             zoom={pdfZoom}
+             visualZoom={pdfVisualZoom}
+             targetToReveal={targetToReveal}
+             currentSelection={currentSelection}
+             currentSelectionTargets={selectedTargets}
+             onPageStatusChange={handlePdfPageStatusChange}
+             onTextSelected={handleTextSelected}
+             onRegionSelected={handleRegionSelected}
+             onAnnotationContextMenu={handleAnnotationContextMenu}
+             onSelectionContextMenu={handleSelectionContextMenu}
+             onAnnotationContextMenuEmpty={clearSelection}
+           />
+         </div>
         </section>
 
         <div
@@ -4030,7 +4867,10 @@ async function handleAskAi() {
                               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left text-xs leading-4 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <span className="flex items-center justify-between gap-2">
-                                <span>{concept}</span>
+                                <RichAiInlineText
+                                  text={concept}
+                                  className="min-w-0"
+                                />
                                 <span className="shrink-0 text-slate-400">
                                   {activeFollowUpConcept === followUpKey ? (
                                     <span className="block h-3 w-3 animate-spin rounded-full border border-slate-300 border-t-slate-700" />

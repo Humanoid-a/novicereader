@@ -239,6 +239,7 @@ export function ReaderGuide({
     }
 
     const resetTimer = window.setTimeout(() => {
+      setTargetRect(null);
       setStepIndex(0);
       onStepChange?.(0);
     }, 0);
@@ -253,19 +254,56 @@ export function ReaderGuide({
       return;
     }
 
+    let frameId: number | null = null;
+    let secondFrameId: number | null = null;
+    const timeoutIds: number[] = [];
+
     function updateTargetRect() {
       setTargetRect(readTargetRect(currentStep.selector));
     }
 
-    updateTargetRect();
+    function scheduleTargetRectUpdate() {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        updateTargetRect();
+
+        secondFrameId = window.requestAnimationFrame(() => {
+          secondFrameId = null;
+          updateTargetRect();
+        });
+      });
+    }
+
+    scheduleTargetRectUpdate();
+    timeoutIds.push(
+      window.setTimeout(updateTargetRect, 80),
+      window.setTimeout(updateTargetRect, 220)
+    );
     window.addEventListener("resize", updateTargetRect);
-    window.addEventListener("scroll", updateTargetRect, true);
+    window.addEventListener("scroll", scheduleTargetRectUpdate, true);
 
     return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
+
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
       window.removeEventListener("resize", updateTargetRect);
-      window.removeEventListener("scroll", updateTargetRect, true);
+      window.removeEventListener("scroll", scheduleTargetRectUpdate, true);
     };
-  }, [currentStep.selector, isOpen]);
+  }, [currentStep.selector, isOpen, stepIndex]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -357,6 +395,7 @@ export function ReaderGuide({
               disabled={isFirstStep}
               onClick={() => {
                 const nextStepIndex = Math.max(stepIndex - 1, 0);
+                setTargetRect(null);
                 setStepIndex(nextStepIndex);
                 onStepChange?.(nextStepIndex);
               }}
@@ -377,6 +416,7 @@ export function ReaderGuide({
                   stepIndex + 1,
                   guideSteps.length - 1
                 );
+                setTargetRect(null);
                 setStepIndex(nextStepIndex);
                 onStepChange?.(nextStepIndex);
               }}

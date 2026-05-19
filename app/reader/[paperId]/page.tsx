@@ -667,9 +667,8 @@ const PDF_ZOOM_MIN = 0.5;
 const PDF_ZOOM_MAX = 1.6;
 const PDF_ZOOM_STEP = 0.1;
 const PDF_BOOKMARK_STORAGE_PREFIX = "novicereader:pdf-bookmarks:v1";
-const PDF_BOOKMARK_CURSOR_MAX_AGE_MS = 8000;
 const PDF_BOOKMARK_LOCAL_RAIL_FALLBACK_LEFT_PX = 24;
-const PDF_BOOKMARK_LOCAL_RAIL_GLOBAL_GAP_PX = 24;
+const PDF_BOOKMARK_LOCAL_RAIL_GLOBAL_GAP_PX = 12;
 const PDF_BOOKMARK_LOCAL_RAIL_RIGHT_PADDING_PX = 24;
 const GUIDE_DEMO_REGION_IMAGE_SRC = "/guide/demo-region.png";
 const GUIDE_DEMO_CREATED_AT = "2026-01-01T00:00:00.000Z";
@@ -904,7 +903,6 @@ export default function ReaderPage() {
   const pdfBookmarkScrollAnimationRef = useRef<number | null>(null);
   const pdfCursorBookmarkPositionRef = useRef<{
     ratio: number;
-    updatedAt: number;
   } | null>(null);
   const pdfBookmarkPlacementPointerYRef = useRef<number | null>(null);
   const selectionPreviewCloseTimeoutRef = useRef<number | null>(null);
@@ -1416,6 +1414,15 @@ useEffect(() => {
   };
 }, [isReaderProfileMenuOpen]);
 
+function clearPendingPdfZoomCommit() {
+  if (pdfZoomCommitTimeoutRef.current === null) {
+    return;
+  }
+
+  window.clearTimeout(pdfZoomCommitTimeoutRef.current);
+  pdfZoomCommitTimeoutRef.current = null;
+}
+
 useEffect(() => {
   const scrollContainer = pdfScrollContainerRef.current;
 
@@ -1894,6 +1901,49 @@ function rememberBookmarkDisplayChange(nextBookmarks: ReaderBookmark[]) {
   });
 }
 
+function restoreHistoryAnnotationPreview() {
+  const scrollContainer = pdfScrollContainerRef.current;
+  const previousScrollPosition = historyHoverScrollPositionRef.current;
+
+  setTargetToReveal(null);
+
+  if (scrollContainer && previousScrollPosition !== null) {
+    const zoomRatio =
+      previousScrollPosition.visualZoom > 0
+        ? pdfVisualZoomRef.current / previousScrollPosition.visualZoom
+        : 1;
+
+    scrollContainer.scrollTo({
+      left: previousScrollPosition.left * zoomRatio,
+      top: previousScrollPosition.top * zoomRatio,
+      behavior: "auto",
+    });
+  }
+
+  historyHoverScrollPositionRef.current = null;
+}
+
+function clearSelectionPreviewCloseTimer() {
+  if (selectionPreviewCloseTimeoutRef.current === null) {
+    return;
+  }
+
+  window.clearTimeout(selectionPreviewCloseTimeoutRef.current);
+  selectionPreviewCloseTimeoutRef.current = null;
+}
+
+function closeSelectionPreviewNow() {
+  clearSelectionPreviewCloseTimer();
+
+  if (previewedSelectionTargetIdRef.current === null) {
+    return;
+  }
+
+  previewedSelectionTargetIdRef.current = null;
+  setPreviewedSelectionTargetId(null);
+  restoreHistoryAnnotationPreview();
+}
+
 function setSelectionDisplayWithHistory(
   nextTargets: AnnotationTarget[],
   focusedTarget?: AnnotationTarget | null,
@@ -2131,15 +2181,6 @@ function clearSelection() {
   setRelatedConversationsExpanded(false);
 }
 
-function clearPendingPdfZoomCommit() {
-  if (pdfZoomCommitTimeoutRef.current === null) {
-    return;
-  }
-
-  window.clearTimeout(pdfZoomCommitTimeoutRef.current);
-  pdfZoomCommitTimeoutRef.current = null;
-}
-
 function setCommittedPdfZoom(nextZoom: number) {
   const clampedNextZoom = clampPdfZoom(nextZoom);
 
@@ -2202,7 +2243,6 @@ function rememberPdfCursorBookmarkPosition(event: MouseEvent<HTMLElement>) {
   pdfBookmarkPlacementPointerYRef.current = getPdfBookmarkPointerY(event);
   pdfCursorBookmarkPositionRef.current = {
     ratio,
-    updatedAt: Date.now(),
   };
 
   if (isPdfBookmarkPlacementActive) {
@@ -2214,10 +2254,7 @@ function getCurrentPdfBookmarkRatio() {
   const scrollContainer = pdfScrollContainerRef.current;
   const cursorPosition = pdfCursorBookmarkPositionRef.current;
 
-  if (
-    cursorPosition &&
-    Date.now() - cursorPosition.updatedAt <= PDF_BOOKMARK_CURSOR_MAX_AGE_MS
-  ) {
+  if (cursorPosition) {
     return cursorPosition.ratio;
   }
 
@@ -2381,9 +2418,9 @@ function restorePdfBookmarkPreview() {
   const scrollContainer = pdfScrollContainerRef.current;
   const previousScrollPosition = bookmarkHoverScrollPositionRef.current;
 
-  cancelPdfBookmarkScrollAnimation();
-
   if (scrollContainer && previousScrollPosition !== null) {
+    cancelPdfBookmarkScrollAnimation();
+
     const zoomRatio =
       previousScrollPosition.visualZoom > 0
         ? pdfVisualZoomRef.current / previousScrollPosition.visualZoom
@@ -2417,7 +2454,12 @@ function removePdfBookmark(bookmarkId: string) {
 }
 
 function handlePdfScroll() {
-  setPreviewedPdfBookmarkId((current) => (current ? null : current));
+  if (
+    bookmarkHoverScrollPositionRef.current === null &&
+    pdfBookmarkScrollAnimationRef.current === null
+  ) {
+    setPreviewedPdfBookmarkId((current) => (current ? null : current));
+  }
 
   const scrollContainer = pdfScrollContainerRef.current;
 
@@ -2462,6 +2504,16 @@ function handlePdfBookmarkPlacementMouseDown(event: MouseEvent<HTMLElement>) {
 
 useEffect(() => {
   function handlePdfBookmarkShortcut(event: KeyboardEvent) {
+    if (
+      event.key === "Delete" &&
+      previewedPdfBookmarkId &&
+      !isEditableShortcutTarget(event.target)
+    ) {
+      event.preventDefault();
+      removePdfBookmark(previewedPdfBookmarkId);
+      return;
+    }
+
     if (
       isPdfBookmarkPlacementActive &&
       event.key === "Escape" &&
@@ -2774,37 +2826,6 @@ function previewHistoryAnnotation(targetId: string) {
   });
 }
 
-function restoreHistoryAnnotationPreview() {
-  const scrollContainer = pdfScrollContainerRef.current;
-  const previousScrollPosition = historyHoverScrollPositionRef.current;
-
-  setTargetToReveal(null);
-
-  if (scrollContainer && previousScrollPosition !== null) {
-    const zoomRatio =
-      previousScrollPosition.visualZoom > 0
-        ? pdfVisualZoomRef.current / previousScrollPosition.visualZoom
-        : 1;
-
-    scrollContainer.scrollTo({
-      left: previousScrollPosition.left * zoomRatio,
-      top: previousScrollPosition.top * zoomRatio,
-      behavior: "auto",
-    });
-  }
-
-  historyHoverScrollPositionRef.current = null;
-}
-
-function clearSelectionPreviewCloseTimer() {
-  if (selectionPreviewCloseTimeoutRef.current === null) {
-    return;
-  }
-
-  window.clearTimeout(selectionPreviewCloseTimeoutRef.current);
-  selectionPreviewCloseTimeoutRef.current = null;
-}
-
 function openSelectionPreview(targetId: string) {
   clearSelectionPreviewCloseTimer();
 
@@ -2815,18 +2836,6 @@ function openSelectionPreview(targetId: string) {
   previewedSelectionTargetIdRef.current = targetId;
   setPreviewedSelectionTargetId(targetId);
   previewHistoryAnnotation(targetId);
-}
-
-function closeSelectionPreviewNow() {
-  clearSelectionPreviewCloseTimer();
-
-  if (previewedSelectionTargetIdRef.current === null) {
-    return;
-  }
-
-  previewedSelectionTargetIdRef.current = null;
-  setPreviewedSelectionTargetId(null);
-  restoreHistoryAnnotationPreview();
 }
 
 function scheduleCloseSelectionPreview() {
@@ -4159,8 +4168,8 @@ async function handleAskAi() {
               onFocus={() => previewPdfBookmark(bookmark)}
               onBlur={restorePdfBookmarkPreview}
               onClick={(event) => {
-                event.currentTarget.blur();
                 jumpToPdfBookmark(bookmark);
+                event.currentTarget.blur();
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -4199,7 +4208,7 @@ async function handleAskAi() {
         {isPdfBookmarkPlacementActive &&
            pdfBookmarkPlacementLineTop !== null && (
              <div
-               className="pointer-events-none absolute left-3 right-3 z-[80] -translate-y-1/2 border-t border-dashed border-sky-500/45 shadow-[0_0_0_1px_rgba(255,255,255,0.65)]"
+               className="pointer-events-none absolute left-3 right-3 z-40 -translate-y-1/2 border-t border-dashed border-sky-500/45 shadow-[0_0_0_1px_rgba(255,255,255,0.65)]"
                style={{ top: pdfBookmarkPlacementLineTop }}
              />
            )}
@@ -4208,7 +4217,7 @@ async function handleAskAi() {
            pdfBookmarkDocumentHeight > 0 && (
            <div
              aria-label="PDF bookmark document positions"
-             className="pointer-events-none absolute top-0 z-[55] w-4 -translate-x-1/2"
+             className="pointer-events-none absolute top-0 z-40 w-4 -translate-x-1/2"
              style={{
                height: pdfBookmarkDocumentHeight,
                left: pdfBookmarkLocalRailLeft,
@@ -4234,8 +4243,8 @@ async function handleAskAi() {
                    onFocus={() => selectPdfBookmarkIcon(bookmark.id)}
                    onBlur={() => clearSelectedPdfBookmarkIcon(bookmark.id)}
                    onClick={(event) => {
-                     event.currentTarget.blur();
                      jumpToPdfBookmark(bookmark);
+                     event.currentTarget.blur();
                    }}
                    onContextMenu={(event) => {
                      event.preventDefault();
@@ -4290,7 +4299,7 @@ async function handleAskAi() {
 
         <div
           data-guide="selection-toolbox"
-          className="pointer-events-none absolute right-[329px] top-5 z-20"
+          className="pointer-events-none absolute right-[349px] top-5 z-20"
         >
           <div
             className={`pointer-events-auto flex flex-col gap-1 rounded-lg border border-slate-200 bg-white/95 p-1 shadow-sm backdrop-blur transition ${

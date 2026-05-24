@@ -409,6 +409,33 @@ export async function listGuestPapers(): Promise<PaperWithUrls[]> {
   }
 }
 
+export async function listLocalGuestPapers(): Promise<PaperWithUrls[]> {
+  const localPapers = await runStoreRequest<GuestPaperRecord[]>(
+    "papers",
+    "readonly",
+    (store) => store.getAll(),
+  );
+
+  return localPapers.map(guestPaperToPaperWithUrl);
+}
+
+export async function getGuestPaperFile(paperId: string): Promise<File> {
+  const paper = await runStoreRequest<GuestPaperRecord | undefined>(
+    "papers",
+    "readonly",
+    (store) => store.get(paperId),
+  );
+
+  if (!paper) {
+    throw new Error("Guest paper backup not found.");
+  }
+
+  return new File([paper.fileBlob], paper.originalFilename || "guest-paper.pdf", {
+    type: paper.contentType || "application/pdf",
+    lastModified: new Date(paper.updatedAt).getTime(),
+  });
+}
+
 export async function getGuestPaper(paperId: string): Promise<PaperWithUrls> {
   const localPaper = await runStoreRequest<GuestPaperRecord | undefined>(
     "papers",
@@ -461,6 +488,14 @@ export async function deleteGuestPaper(paperId: string) {
   );
 
   return { success: true, deletedPaperId: paperId };
+}
+
+export async function listLocalGuestAnnotations(
+  paperId: string,
+): Promise<AiAnnotation[]> {
+  const annotations = await readGuestAnnotations(paperId);
+
+  return annotations.filter((annotation) => !annotation.isDeleted);
 }
 
 export async function listGuestAnnotations(

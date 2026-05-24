@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   clearStoredAuthSession,
+  createPaperAnnotation,
   deletePaper,
   getCurrentUser,
   getStoredAuthToken,
@@ -15,9 +16,12 @@ import {
 import {
   deleteGuestPaper,
   endGuestServerSession,
+  getGuestPaperFile,
   getGuestUserProfile,
   isGuestSessionActive,
   listGuestPapers,
+  listLocalGuestAnnotations,
+  listLocalGuestPapers,
   uploadGuestPaper,
 } from "@/lib/guestSession";
 import {
@@ -28,11 +32,18 @@ import {
 } from "@/lib/localLibrary";
 import type { PaperWithUrls } from "@/types/paper";
 import type { UserProfile } from "@/types/user";
+import type { AiAnnotation } from "@/types/annotation";
+
+type PaperSource = "cloud" | "local" | "guest";
+
+type LibraryPaper = PaperWithUrls & {
+  source: PaperSource;
+};
 
 type DeleteConfirmation =
   | {
       type: "single";
-      paper: PaperWithUrls;
+      paper: LibraryPaper;
     }
   | {
       type: "bulk";
@@ -45,6 +56,10 @@ type DraggedDocument = {
   sizeBytes: number | null;
   isValid: boolean;
 };
+
+function getPaperMenuKey(paper: LibraryPaper) {
+  return `${paper.source}:${paper.id}`;
+}
 
 function formatFileSize(sizeBytes: number) {
   if (sizeBytes < 1024 * 1024) {
@@ -78,6 +93,38 @@ function isStorageLimitUploadError(error: unknown) {
   const message = error.message.toLowerCase();
 
   return message.includes("storage limit") || message.includes("space needs to be cleared");
+}
+
+function tagPaperSource(
+  papers: PaperWithUrls[],
+  source: PaperSource,
+): LibraryPaper[] {
+  return papers.map((paper) => ({ ...paper, source }));
+}
+
+function sortLibraryPapers(papers: LibraryPaper[]) {
+  return [...papers].sort(
+    (left, right) =>
+      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+  );
+}
+
+function getPaperSourceLabel(source: PaperSource) {
+  if (source === "guest") {
+    return "Guest backup";
+  }
+
+  if (source === "local") {
+    return "On this computer";
+  }
+
+  return "Cloud";
+}
+
+function getReaderHref(paper: LibraryPaper) {
+  return paper.source === "guest"
+    ? `/reader/${paper.id}?source=guest`
+    : `/reader/${paper.id}`;
 }
 
 function getDraggedDocument(event: DragEvent<HTMLElement>): DraggedDocument | null {
@@ -140,6 +187,51 @@ function TrashIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function EllipsisIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M6.5 12h.01M12 12h.01M17.5 12h.01"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MoveToUserIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
+      <path
+        d="M12 4v10M8.5 7.5 12 4l3.5 3.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6 14.5v3.8c0 .7.5 1.2 1.2 1.2h9.6c.7 0 1.2-.5 1.2-1.2v-3.8"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function migrateAnnotationToPaper(
+  annotation: AiAnnotation,
+  paper: PaperWithUrls,
+  userId: string,
+): AiAnnotation {
+  return {
+    ...annotation,
+    paperId: paper.id,
+    userId,
+  };
+}
+
 export default function HomePage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -147,13 +239,17 @@ export default function HomePage() {
 
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [isGuestMode, setIsGuestMode] = useState(false);
-  const [papers, setPapers] = useState<PaperWithUrls[]>([]);
+  const [papers, setPapers] = useState<LibraryPaper[]>([]);
   const [showAllPapers, setShowAllPapers] = useState(false);
+  const [showGuestBackups, setShowGuestBackups] = useState(false);
+  const [guestBackupCount, setGuestBackupCount] = useState(0);
   const [isLoadingPapers, setIsLoadingPapers] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [deletingPaperId, setDeletingPaperId] = useState<string | null>(null);
+  const [migratingPaperId, setMigratingPaperId] = useState<string | null>(null);
   const [isSelectingPapers, setIsSelectingPapers] = useState(false);
   const [selectedPaperIds, setSelectedPaperIds] = useState<string[]>([]);
+  const [openPaperMenuId, setOpenPaperMenuId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] =
     useState<DeleteConfirmation>(null);
   const [pendingGuestUploadFile, setPendingGuestUploadFile] =
@@ -176,13 +272,6 @@ export default function HomePage() {
       };
     }
 
-    if (hasGuestSession && !hasStoredAuthToken) {
-      setIsGuestMode(true);
-      setCurrentUser(getGuestUserProfile());
-    } else {
-      setIsGuestMode(false);
-    }
-
     async function loadDashboard() {
       setIsLoadingPapers(true);
       setError("");
@@ -192,13 +281,10 @@ export default function HomePage() {
           const loadedPapers = await listGuestPapers();
 
           if (isMounted) {
-            setPapers(
-              [...loadedPapers].sort(
-                (left, right) =>
-                  new Date(right.updatedAt).getTime() -
-                  new Date(left.updatedAt).getTime(),
-              ),
-            );
+            setIsGuestMode(true);
+            setCurrentUser(getGuestUserProfile());
+            setGuestBackupCount(loadedPapers.length);
+            setPapers(sortLibraryPapers(tagPaperSource(loadedPapers, "guest")));
           }
 
           return;
@@ -208,18 +294,26 @@ export default function HomePage() {
           getCurrentUser(),
           listPapers(),
         ]);
-        const loadedLocalPapers = await listLocalPapers(loadedUser.id);
-        const loadedPapers = [...loadedCloudPapers, ...loadedLocalPapers];
+        const [loadedLocalPapers, loadedGuestBackups] = await Promise.all([
+          listLocalPapers(loadedUser.id),
+          listLocalGuestPapers().catch((error) => {
+            console.warn("Failed to load local guest backups.", error);
+            return [];
+          }),
+        ]);
+        const loadedPapers = [
+          ...tagPaperSource(loadedCloudPapers, "cloud"),
+          ...tagPaperSource(loadedLocalPapers, "local"),
+          ...(showGuestBackups
+            ? tagPaperSource(loadedGuestBackups, "guest")
+            : []),
+        ];
 
         if (isMounted) {
+          setIsGuestMode(false);
           setCurrentUser(loadedUser);
-          setPapers(
-            [...loadedPapers].sort(
-              (left, right) =>
-                new Date(right.updatedAt).getTime() -
-                new Date(left.updatedAt).getTime(),
-            ),
-          );
+          setGuestBackupCount(loadedGuestBackups.length);
+          setPapers(sortLibraryPapers(loadedPapers));
         }
       } catch (error) {
         console.error(error);
@@ -244,7 +338,7 @@ export default function HomePage() {
     return () => {
       isMounted = false;
     };
-  }, [router]);
+  }, [router, showGuestBackups]);
 
   useEffect(() => {
     if (!isGuestMode || papers.length === 0) {
@@ -437,23 +531,25 @@ export default function HomePage() {
     router.replace("/login");
   }
 
-  function handleDeletePaper(paper: PaperWithUrls) {
+  function handleDeletePaper(paper: LibraryPaper) {
+    setOpenPaperMenuId(null);
     setDeleteConfirmation({
       type: "single",
       paper,
     });
   }
 
-  async function confirmDeletePaper(paper: PaperWithUrls) {
+  async function confirmDeletePaper(paper: LibraryPaper) {
     setDeleteConfirmation(null);
 
     setDeletingPaperId(paper.id);
     setError("");
 
     try {
-      if (isGuestMode) {
+      if (paper.source === "guest") {
         await deleteGuestPaper(paper.id);
-      } else if (isLocalPaperId(paper.id)) {
+        setGuestBackupCount((current) => Math.max(0, current - 1));
+      } else if (paper.source === "local" || isLocalPaperId(paper.id)) {
         await deleteLocalPaper(paper.id);
       } else {
         await deletePaper(paper.id);
@@ -469,6 +565,51 @@ export default function HomePage() {
       setError("Failed to delete this paper. Make sure the backend is running.");
     } finally {
       setDeletingPaperId(null);
+    }
+  }
+
+  async function handleMigrateGuestPaper(paper: LibraryPaper) {
+    if (paper.source !== "guest" || !currentUser) {
+      return;
+    }
+
+    setOpenPaperMenuId(null);
+    setMigratingPaperId(paper.id);
+    setError("");
+
+    try {
+      const guestFile = await getGuestPaperFile(paper.id);
+      const uploadedPaper = await uploadPaper(guestFile);
+      const guestAnnotations = await listLocalGuestAnnotations(paper.id);
+
+      for (const annotation of guestAnnotations) {
+        await createPaperAnnotation(
+          uploadedPaper.id,
+          migrateAnnotationToPaper(annotation, uploadedPaper, currentUser.id),
+        );
+      }
+
+      await deleteGuestPaper(paper.id);
+
+      setGuestBackupCount((current) => Math.max(0, current - 1));
+      setSelectedPaperIds((currentSelectedIds) =>
+        currentSelectedIds.filter((paperId) => paperId !== paper.id),
+      );
+      setPapers((currentPapers) =>
+        sortLibraryPapers([
+          ...currentPapers.filter((currentPaper) => currentPaper.id !== paper.id),
+          { ...uploadedPaper, source: "cloud" as const },
+        ]),
+      );
+    } catch (error) {
+      console.error(error);
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to migrate this guest document.",
+      );
+    } finally {
+      setMigratingPaperId(null);
     }
   }
 
@@ -507,9 +648,12 @@ export default function HomePage() {
 
     try {
       for (const paperId of selectedIds) {
-        if (isGuestMode) {
-          await deleteGuestPaper(paperId);
-        } else if (isLocalPaperId(paperId)) {
+        const paper = papers.find((currentPaper) => currentPaper.id === paperId);
+
+        if (paper?.source === "guest") {
+          await deleteGuestPaper(paper.id);
+          setGuestBackupCount((current) => Math.max(0, current - 1));
+        } else if (paper?.source === "local" || isLocalPaperId(paperId)) {
           await deleteLocalPaper(paperId);
         } else {
           await deletePaper(paperId);
@@ -555,12 +699,15 @@ export default function HomePage() {
         }?`;
   const deleteConfirmationMessage =
     deleteConfirmation?.type === "single"
-      ? isGuestMode
-        ? "This will remove the guest document and its local browser backup."
+      ? deleteConfirmation.paper.source === "guest"
+        ? "This will remove the guest backup from this browser."
+        : deleteConfirmation.paper.source === "local"
+          ? "This will remove the computer-only document and its saved reader data."
         : "This will remove the document and its saved reader data."
       : isGuestMode
         ? "This will remove the selected guest documents and their local browser backups."
         : "This will remove the selected documents and their saved reader data.";
+  const canShowGuestBackups = !isGuestMode && guestBackupCount > 0;
 
   return (
     <main className="min-h-screen bg-slate-100">
@@ -610,6 +757,34 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {canShowGuestBackups && (
+              <button
+                type="button"
+                aria-pressed={showGuestBackups}
+                onClick={() => {
+                  setShowGuestBackups((isShown) => !isShown);
+                  setOpenPaperMenuId(null);
+                  setShowAllPapers(false);
+                }}
+                className={`inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition ${
+                  showGuestBackups
+                    ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-700"
+                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950"
+                }`}
+              >
+                <span>{showGuestBackups ? "Hide guest files" : "Show guest files"}</span>
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                    showGuestBackups
+                      ? "bg-white/15 text-white"
+                      : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {guestBackupCount}
+                </span>
+              </button>
+            )}
+
             {isSelectingPapers ? (
               <>
                 <button
@@ -750,7 +925,14 @@ export default function HomePage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {visiblePapers.map((paper) => (
                 <article
-                  key={paper.id}
+                  key={getPaperMenuKey(paper)}
+                  onMouseLeave={() =>
+                    setOpenPaperMenuId((currentMenuId) =>
+                      currentMenuId === getPaperMenuKey(paper)
+                        ? null
+                        : currentMenuId,
+                    )
+                  }
                   className={`group relative flex min-h-48 flex-col justify-between rounded-lg border p-4 transition hover:-translate-y-0.5 hover:shadow-md ${
                     selectedPaperIds.includes(paper.id)
                       ? "border-slate-900 bg-white ring-2 ring-slate-900/10"
@@ -794,19 +976,65 @@ export default function HomePage() {
                       </span>
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      aria-label={`Delete ${paper.originalFilename}`}
-                      disabled={deletingPaperId === paper.id}
-                      onClick={() => handleDeletePaper(paper)}
-                      className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-200 disabled:cursor-not-allowed disabled:opacity-50 group-hover:opacity-100"
-                    >
-                      {deletingPaperId === paper.id ? (
-                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-red-500" />
-                      ) : (
-                        <TrashIcon className="h-4 w-4" />
+                    <div className="absolute right-3 top-3 z-10">
+                      <button
+                        type="button"
+                        aria-label={`Open menu for ${paper.originalFilename}`}
+                        aria-expanded={openPaperMenuId === getPaperMenuKey(paper)}
+                        disabled={
+                          deletingPaperId === paper.id ||
+                          migratingPaperId === paper.id
+                        }
+                        onClick={() =>
+                          setOpenPaperMenuId((currentMenuId) =>
+                            currentMenuId === getPaperMenuKey(paper)
+                              ? null
+                            : getPaperMenuKey(paper),
+                          )
+                        }
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm ring-1 ring-slate-200 transition hover:bg-white hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50 ${
+                          openPaperMenuId === getPaperMenuKey(paper)
+                            ? "opacity-100"
+                            : "opacity-0 focus:opacity-100 group-hover:opacity-100"
+                        }`}
+                      >
+                        {deletingPaperId === paper.id ||
+                        migratingPaperId === paper.id ? (
+                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+                        ) : (
+                          <EllipsisIcon className="h-4 w-4" />
+                        )}
+                      </button>
+
+                      {openPaperMenuId === getPaperMenuKey(paper) && (
+                        <div className="absolute right-0 top-9 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10">
+                          {!isGuestMode && paper.source === "guest" && (
+                            <button
+                              type="button"
+                              disabled={migratingPaperId === paper.id}
+                              onClick={() => handleMigrateGuestPaper(paper)}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <MoveToUserIcon className="h-4 w-4" />
+                              <span>
+                                {migratingPaperId === paper.id
+                                  ? "Migrating..."
+                                  : "Migrate to user"}
+                              </span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={deletingPaperId === paper.id}
+                            onClick={() => handleDeletePaper(paper)}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <TrashIcon className="h-4 w-4" />
+                            <span>Delete</span>
+                          </button>
+                        </div>
                       )}
-                    </button>
+                    </div>
                   )}
 
                   {isSelectingPapers ? (
@@ -827,7 +1055,11 @@ export default function HomePage() {
                       </p>
                     </button>
                   ) : (
-                    <Link href={`/reader/${paper.id}`} className="block pr-8">
+                    <Link
+                      href={getReaderHref(paper)}
+                      className="block pr-8"
+                      onClick={() => setOpenPaperMenuId(null)}
+                    >
                       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 transition group-hover:text-slate-900">
                         <DocumentIcon className="h-8 w-8" />
                       </div>
@@ -841,9 +1073,22 @@ export default function HomePage() {
                     </Link>
                   )}
 
-                  <div className="mt-6 flex items-center justify-between border-t border-slate-200 pt-3 text-xs text-slate-500">
+                  <div className="mt-6 flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-xs text-slate-500">
                     <span>{formatDate(paper.updatedAt)}</span>
-                    <span>{formatFileSize(paper.sizeBytes)}</span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate">{formatFileSize(paper.sizeBytes)}</span>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          paper.source === "guest"
+                            ? "bg-amber-50 text-amber-700 ring-1 ring-amber-100"
+                            : paper.source === "local"
+                              ? "bg-blue-50 text-blue-700 ring-1 ring-blue-100"
+                              : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100"
+                        }`}
+                      >
+                        {getPaperSourceLabel(paper.source)}
+                      </span>
+                    </div>
                   </div>
                 </article>
               ))}

@@ -46,18 +46,6 @@
     "updatedAt": "2026-05-16T03:29:02.315510+00:00"
   },
   {
-    "id": "c9867353-1134-4042-86b4-efd69b86e3b3",
-    "userId": "guest-e22cc86720414898ab49a147",
-    "originalFilename": "RDT_2502.05171v2.pdf",
-    "storedFilename": "original.pdf",
-    "storageKey": "novicereader/users/guest-e22cc86720414898ab49a147/papers/c9867353-1134-4042-86b4-efd69b86e3b3/original.pdf",
-    "analysisProfileId": null,
-    "contentType": "application/pdf",
-    "sizeBytes": 11557797,
-    "createdAt": "2026-05-16T03:31:24.480874+00:00",
-    "updatedAt": "2026-05-16T03:31:24.480874+00:00"
-  },
-  {
     "id": "33e4b92f-4537-4efa-8ae4-1e53f601de5d",
     "userId": "novicereader",
     "originalFilename": "RDT_2502.05171v2.pdf",
@@ -68,5 +56,17 @@
     "sizeBytes": 11557797,
     "createdAt": "2026-05-18T03:13:56.017521+00:00",
     "updatedAt": "2026-05-18T03:16:23.603363+00:00"
+  },
+  {
+    "id": "691ee54b-a675-4657-ac06-3e09de477995",
+    "userId": "novicereader",
+    "originalFilename": "RDT_2502.05171v2.pdf",
+    "storedFilename": "original.pdf",
+    "storageKey": "novicereader/users/novicereader/papers/691ee54b-a675-4657-ac06-3e09de477995/original.pdf",
+    "analysisProfileId": "9958f750-cddd-45bf-bcd8-b3e6138ffb36",
+    "contentType": "application/pdf",
+    "sizeBytes": 11557797,
+    "createdAt": "2026-05-24T07:11:58.519480+00:00",
+    "updatedAt": "2026-05-24T07:14:37.369864+00:00"
   }
 ]

@@ -11,7 +11,7 @@ import {
   type MouseEvent,
 } from "react";
 import { createId } from "@/lib/id";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import PdfViewer from "@/components/PdfViewer";
 import ReaderGuide from "@/components/ReaderGuide";
@@ -262,6 +262,45 @@ function getLatestAnnotationVersionForKind(
     .find((version) => inferAnnotationVersionResponseKind(version) === kind);
 }
 
+function normalizeFollowUpPrompt(prompt: string) {
+  return prompt.trim().toLowerCase();
+}
+
+function mergeFollowUpExplanations(
+  primary: AiExplanationContent,
+  fallback?: AiExplanationContent | null
+): AiExplanationContent {
+  const mergedFollowUps = new Map<
+    string,
+    NonNullable<AiExplanationContent["followUpExplanations"]>[number]
+  >();
+
+  for (const followUp of fallback?.followUpExplanations ?? []) {
+    const key = normalizeFollowUpPrompt(followUp.prompt);
+
+    if (key) {
+      mergedFollowUps.set(key, followUp);
+    }
+  }
+
+  for (const followUp of primary.followUpExplanations ?? []) {
+    const key = normalizeFollowUpPrompt(followUp.prompt);
+
+    if (key) {
+      mergedFollowUps.set(key, followUp);
+    }
+  }
+
+  if (mergedFollowUps.size === 0) {
+    return primary;
+  }
+
+  return {
+    ...primary,
+    followUpExplanations: Array.from(mergedFollowUps.values()),
+  };
+}
+
 function getAnnotationResponseContent(
   annotation: AiAnnotation | null,
   kind: AiAnnotationResponseKind
@@ -271,17 +310,23 @@ function getAnnotationResponseContent(
   }
 
   if (kind === "summary") {
-    if (annotation.summary?.mainExplanation?.trim()) {
-      return annotation.summary;
-    }
-
     const summaryVersion = getLatestAnnotationVersionForKind(
       annotation,
       "summary"
     );
 
+    if (annotation.summary?.mainExplanation?.trim()) {
+      return mergeFollowUpExplanations(
+        annotation.summary,
+        summaryVersion?.explanation
+      );
+    }
+
     if (summaryVersion) {
-      return summaryVersion.explanation;
+      return mergeFollowUpExplanations(
+        summaryVersion.explanation,
+        annotation.summary
+      );
     }
 
     return inferAnnotationResponseKind(annotation) === "summary"
@@ -295,7 +340,10 @@ function getAnnotationResponseContent(
   );
 
   if (explanationVersion) {
-    return explanationVersion.explanation;
+    return mergeFollowUpExplanations(
+      explanationVersion.explanation,
+      annotation.explanation
+    );
   }
 
   return inferAnnotationResponseKind(annotation) === "summary"
@@ -419,16 +467,31 @@ function setAnnotationResponseContent(
   kind: AiAnnotationResponseKind,
   content: AiExplanationContent
 ): AiAnnotation {
+  const latestVersionId = getLatestAnnotationVersionForKind(annotation, kind)?.id;
+  const versions = latestVersionId
+    ? annotation.versions?.map((version) =>
+        version.id === latestVersionId
+          ? {
+              ...version,
+              response: content.mainExplanation,
+              explanation: content,
+            }
+          : version
+      )
+    : annotation.versions;
+
   if (kind === "summary") {
     return {
       ...annotation,
       summary: content,
+      versions,
     };
   }
 
   return {
     ...annotation,
     explanation: content,
+    versions,
   };
 }
 
@@ -624,11 +687,18 @@ function getFollowUpResponse(
   concept: string,
   kind: AiAnnotationResponseKind
 ) {
-  return (
-    getAnnotationResponseContent(annotation, kind)?.followUpExplanations?.find(
-      (followUp) => followUp.prompt === concept
-    )?.response ?? ""
-  );
+  const conceptKey = normalizeFollowUpPrompt(concept);
+  const followUps =
+    getAnnotationResponseContent(annotation, kind)?.followUpExplanations ?? [];
+  const savedFollowUp = [...followUps]
+    .reverse()
+    .find(
+      (followUp) =>
+        normalizeFollowUpPrompt(followUp.prompt) === conceptKey &&
+        Boolean(followUp.response?.trim())
+    );
+
+  return savedFollowUp?.response ?? "";
 }
 
 function sortConversationsNewestFirst(conversations: QuestionConversation[]) {
@@ -883,7 +953,9 @@ function buildGuideDemoAnnotation(
 export default function ReaderPage() {
   const params = useParams<{ paperId: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const paperId = params.paperId;
+  const requestedPaperSource = searchParams.get("source");
   const pdfScrollContainerRef = useRef<HTMLElement | null>(null);
   const pdfBookmarkGlobalRailRef = useRef<HTMLDivElement | null>(null);
   const pdfBookmarkContentRef = useRef<HTMLDivElement | null>(null);
@@ -1139,8 +1211,9 @@ useEffect(() => {
 
   const hasStoredAuthToken = Boolean(getStoredAuthToken());
   const hasGuestSession = isGuestSessionActive();
+  const shouldLoadGuestPaper = requestedPaperSource === "guest";
 
-  if (!hasStoredAuthToken && !hasGuestSession) {
+  if (!hasStoredAuthToken && !hasGuestSession && !shouldLoadGuestPaper) {
     router.replace("/login");
     return;
   }
@@ -1149,7 +1222,7 @@ useEffect(() => {
     try {
       setIsLoading(true);
 
-      if (hasGuestSession && !hasStoredAuthToken) {
+      if (shouldLoadGuestPaper || (hasGuestSession && !hasStoredAuthToken)) {
         const loadedPaper = await getGuestPaper(paperId);
         const loadedAnnotations = await listGuestAnnotations(paperId);
         const loadedConversations = await listGuestConversations(paperId);
@@ -1193,7 +1266,7 @@ useEffect(() => {
   }
 
   loadPaperWorkspace();
-}, [paperId, router]);
+}, [paperId, requestedPaperSource, router]);
 
 useEffect(() => {
   if ((!isGuestMode && !isLocalPaper) || !paper) {
@@ -3615,6 +3688,15 @@ async function handleExplainRelatedConcept(
     const currentContent =
       getAnnotationResponseContent(selectedAnnotation, kind) ??
       selectedAnnotation.explanation;
+    const returnedFollowUp = {
+      ...result.followUp,
+      response:
+        result.followUp.response?.trim() ||
+        result.explanation.mainExplanation,
+    };
+    const returnedFollowUpPromptKey = normalizeFollowUpPrompt(
+      returnedFollowUp.prompt
+    );
     const updatedAnnotation = setAnnotationResponseContent(
       selectedAnnotation,
       kind,
@@ -3622,9 +3704,12 @@ async function handleExplainRelatedConcept(
         ...currentContent,
         followUpExplanations: [
           ...(currentContent.followUpExplanations ?? []).filter(
-            (followUp) => followUp.id !== result.followUp.id
+            (followUp) =>
+              followUp.id !== returnedFollowUp.id &&
+              normalizeFollowUpPrompt(followUp.prompt) !==
+                returnedFollowUpPromptKey
           ),
-          result.followUp,
+          returnedFollowUp,
         ],
       }
     );
